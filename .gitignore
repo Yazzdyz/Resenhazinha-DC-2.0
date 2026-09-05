@@ -1,0 +1,11 @@
+node_modules/
+dist/
+release/
+upload/
+Tropa-Windows.zip
+Tropa-Codigo-Fonte.zip
+Resenhazinha-Windows.zip
+Resenhazinha-Codigo-Fonte.zip
+asar-inspect-*/
+*.log
+.DS_Store

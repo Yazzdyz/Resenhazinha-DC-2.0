@@ -1,0 +1,49 @@
+name: Publicar versão do Resenhazinha
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  windows-release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Baixar código
+        uses: actions/checkout@v4
+
+      - name: Preparar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Montar aplicativo Windows
+        run: npm run package:win
+
+      - name: Criar ZIP do Windows
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $asset = "Resenhazinha-$tag-Windows.zip"
+          Compress-Archive -Path "release/Resenhazinha-win32-x64/*" -DestinationPath $asset -CompressionLevel Optimal
+          "RELEASE_ASSET=$asset" >> $env:GITHUB_ENV
+
+      - name: Criar ou atualizar GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          gh release view $tag --repo "${{ github.repository }}" *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --repo "${{ github.repository }}" --title "Resenhazinha $tag" --generate-notes
+          }
+          gh release upload $tag "$env:RELEASE_ASSET" --repo "${{ github.repository }}" --clobber

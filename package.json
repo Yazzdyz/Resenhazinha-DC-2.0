@@ -1,0 +1,26 @@
+{
+  "name": "resenhazinha",
+  "version": "2.13.1",
+  "private": true,
+  "description": "Resenhazinha com servidor persistente, perfis sincronizados e atualização automática via GitHub Releases.",
+  "main": "electron/main.cjs",
+  "author": "Guilherme",
+  "scripts": {
+    "dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
+    "build": "vite build",
+    "start": "electron .",
+    "package:win": "npm run build && electron-packager . Resenhazinha --platform=win32 --arch=x64 --out=release --overwrite --asar --icon=public/icon.ico --extra-resource=node_modules/loopback-capture/build/Release/loopback_capture_addon.node --extra-resource=THIRD_PARTY_NOTICES.txt --ignore=release --ignore=\\.git --ignore=src --ignore=upload --ignore=Tropa-Windows.zip --ignore=Tropa-Codigo-Fonte.zip --ignore=Resenhazinha-Windows.zip --ignore=Resenhazinha-Codigo-Fonte.zip --ignore=asar-inspect"
+  },
+  "dependencies": {
+    "peerjs": "^1.5.5"
+  },
+  "devDependencies": {
+    "@electron/packager": "^18.3.6",
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.0.0",
+    "electron": "^43.6.0",
+    "loopback-capture": "^2.0.0",
+    "vite": "^7.1.5",
+    "wait-on": "^8.0.4"
+  }
+}
