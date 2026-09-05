@@ -21,7 +21,7 @@ const MAX_SERVER_STATE_BYTES = 2 * 1024 * 1024;
 const MAX_CHAT_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 const MAX_MIXED_AUDIO_PROCESSES = 24;
 const execFileAsync = promisify(execFile);
-const UPDATE_REPOSITORY = "Yazzdyz/resenhazinha";
+const UPDATE_REPOSITORY = "Yazzdyz/Resenhazinha-DC-2.0";
 const UPDATE_ASSET_PATTERN = /Resenhazinha.*Windows\.zip$/i;
 
 function stopFilteredAudioCapture() {
@@ -943,3 +943,4 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", stopFilteredAudioCapture);
+

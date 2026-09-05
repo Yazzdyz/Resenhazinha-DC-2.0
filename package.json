@@ -1,6 +1,6 @@
 {
   "name": "resenhazinha",
-  "version": "2.13.1",
+  "version": "2.13.2",
   "private": true,
   "description": "Resenhazinha com servidor persistente, perfis sincronizados e atualização automática via GitHub Releases.",
   "main": "electron/main.cjs",
