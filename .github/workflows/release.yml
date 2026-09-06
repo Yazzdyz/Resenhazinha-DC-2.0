@@ -20,7 +20,12 @@ jobs:
       - name: Aplicar atualização preparada
         shell: pwsh
         run: |
-          $parts = Get-ChildItem ".github/patch-parts/*.txt" | Sort-Object Name
+          $partNames = @(
+            "01.txt", "02.txt", "03.txt",
+            "04fix1.txt", "04fix2.txt", "04fix3.txt", "04fix4.txt", "04fix5.txt", "04fix6.txt", "04fix7.txt",
+            "05.txt", "06.txt", "07.txt", "08.txt"
+          )
+          $parts = $partNames | ForEach-Object { Get-Item (Join-Path ".github/patch-parts" $_) }
           foreach ($part in $parts) {
             $text = (Get-Content $part.FullName -Raw).Trim()
             $bytes = [Text.Encoding]::UTF8.GetBytes($text)
