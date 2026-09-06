@@ -20,7 +20,14 @@ jobs:
       - name: Aplicar atualização preparada
         shell: pwsh
         run: |
-          $encoded = (Get-ChildItem ".github/patch-parts/*.txt" | Sort-Object Name | ForEach-Object { (Get-Content $_.FullName -Raw).Trim() }) -join ""
+          $parts = Get-ChildItem ".github/patch-parts/*.txt" | Sort-Object Name
+          foreach ($part in $parts) {
+            $text = (Get-Content $part.FullName -Raw).Trim()
+            $bytes = [Text.Encoding]::UTF8.GetBytes($text)
+            $hash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes)).ToLower()
+            Write-Host "$($part.Name) $($text.Length) $hash"
+          }
+          $encoded = ($parts | ForEach-Object { (Get-Content $_.FullName -Raw).Trim() }) -join ""
           $gzipPath = Join-Path $env:RUNNER_TEMP "resenhazinha.patch.gz"
           $patchPath = Join-Path $env:RUNNER_TEMP "resenhazinha.patch"
           [IO.File]::WriteAllBytes($gzipPath, [Convert]::FromBase64String($encoded))
