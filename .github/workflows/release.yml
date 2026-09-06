@@ -56,7 +56,7 @@ jobs:
       - name: Preparar Setup e atualização automática
         shell: pwsh
         run: |
-          node -e 'const fs=require("fs"); const p=JSON.parse(fs.readFileSync("package.json","utf8")); p.version=process.env.APP_VERSION; p.main="electron/bootstrap.cjs"; p.scripts["package:win"]="npm run build && electron-builder --win nsis --x64 --publish always"; p.dependencies={...(p.dependencies||{}),"electron-updater":"6.8.9"}; p.devDependencies={...(p.devDependencies||{}),"electron-builder":"26.16.0"}; p.build={appId:"com.yazzdyz.resenhazinha",productName:"Resenhazinha",asar:true,npmRebuild:false,directories:{output:"release"},files:["dist/**/*","electron/**/*","public/**/*","package.json","!src/**/*","!release/**/*","!.github/**/*","!upload/**/*","!*.zip"],extraResources:[{from:"node_modules/loopback-capture/build/Release/loopback_capture_addon.node",to:"loopback_capture_addon.node"},{from:"THIRD_PARTY_NOTICES.txt",to:"THIRD_PARTY_NOTICES.txt"}],win:{target:[{target:"nsis",arch:["x64"]}],icon:"public/icon.ico",artifactName:"Resenhazinha-Setup-${version}.${ext}"},nsis:{oneClick:false,allowToChangeInstallationDirectory:true,createDesktopShortcut:"always",createStartMenuShortcut:true,shortcutName:"Resenhazinha",runAfterFinish:true,deleteAppDataOnUninstall:false},publish:[{provider:"github",owner:"Yazzdyz",repo:"Resenhazinha-DC-2.0",releaseType:"release",tagNamePrefix:"v"}]}; fs.writeFileSync("package.json",JSON.stringify(p,null,2)+"\n");'
+          node -e 'const fs=require("fs"); const p=JSON.parse(fs.readFileSync("package.json","utf8")); p.version=process.env.APP_VERSION; p.main="electron/bootstrap.cjs"; p.scripts["package:win"]="npm run build && electron-builder --win nsis --x64 --publish never"; p.dependencies={...(p.dependencies||{}),"electron-updater":"6.8.9"}; p.devDependencies={...(p.devDependencies||{}),"electron-builder":"26.16.0"}; p.build={appId:"com.yazzdyz.resenhazinha",productName:"Resenhazinha",asar:true,npmRebuild:false,directories:{output:"release"},files:["dist/**/*","electron/**/*","public/**/*","package.json","!src/**/*","!release/**/*","!.github/**/*","!upload/**/*","!*.zip"],extraResources:[{from:"node_modules/loopback-capture/build/Release/loopback_capture_addon.node",to:"loopback_capture_addon.node"},{from:"THIRD_PARTY_NOTICES.txt",to:"THIRD_PARTY_NOTICES.txt"}],win:{target:[{target:"nsis",arch:["x64"]}],icon:"public/icon.ico",artifactName:"Resenhazinha-Setup-${version}.${ext}"},nsis:{oneClick:false,allowToChangeInstallationDirectory:true,createDesktopShortcut:"always",createStartMenuShortcut:true,shortcutName:"Resenhazinha",runAfterFinish:true,deleteAppDataOnUninstall:false},publish:[{provider:"github",owner:"Yazzdyz",repo:"Resenhazinha-DC-2.0",releaseType:"release",tagNamePrefix:"v"}]}; fs.writeFileSync("package.json",JSON.stringify(p,null,2)+"\n");'
 
       - name: Garantir tag da versão
         shell: pwsh
@@ -72,10 +72,20 @@ jobs:
       - name: Instalar dependências
         run: npm install
 
-      - name: Montar Setup e publicar release
+      - name: Montar Setup do Windows
         run: npm run package:win
+
+      - name: Publicar arquivos da atualização
+        shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "v$env:APP_VERSION"
+          gh release view $tag --repo "${{ github.repository }}" *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --repo "${{ github.repository }}" --target $env:GITHUB_SHA --title "Resenhazinha $tag"
+          }
+          gh release upload $tag "release/Resenhazinha-Setup-$env:APP_VERSION.exe" "release/Resenhazinha-Setup-$env:APP_VERSION.exe.blockmap" "release/latest.yml" --repo "${{ github.repository }}" --clobber
 
       - name: Guardar instalador como artefato do Actions
         uses: actions/upload-artifact@v4
