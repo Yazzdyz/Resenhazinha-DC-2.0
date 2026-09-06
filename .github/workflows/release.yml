@@ -9,6 +9,9 @@ on:
 permissions:
   contents: write
 
+env:
+  APP_VERSION: "3.0.3"
+
 jobs:
   windows-release:
     runs-on: windows-latest
@@ -50,32 +53,25 @@ jobs:
           node-version: "22"
           cache: npm
 
-      - name: Ler versão
+      - name: Preparar Setup e atualização automática
         shell: pwsh
         run: |
-          $version = (Get-Content ./package.json -Raw | ConvertFrom-Json).version
-          $tag = "v$version"
-          "RELEASE_TAG=$tag" >> $env:GITHUB_ENV
-          "RELEASE_ASSET=Resenhazinha-$tag-Windows.zip" >> $env:GITHUB_ENV
+          node -e 'const fs=require("fs"); const p=JSON.parse(fs.readFileSync("package.json","utf8")); p.version=process.env.APP_VERSION; p.main="electron/bootstrap.cjs"; p.scripts["package:win"]="npm run build && electron-builder --win nsis --x64 --publish always"; p.dependencies={...(p.dependencies||{}),"electron-updater":"6.8.9"}; p.devDependencies={...(p.devDependencies||{}),"electron-builder":"26.16.0"}; p.build={appId:"com.yazzdyz.resenhazinha",productName:"Resenhazinha",asar:true,npmRebuild:false,directories:{output:"release"},files:["dist/**/*","electron/**/*","public/**/*","package.json","!src/**/*","!release/**/*","!.github/**/*","!upload/**/*","!*.zip"],extraResources:[{from:"node_modules/loopback-capture/build/Release/loopback_capture_addon.node",to:"loopback_capture_addon.node"},{from:"THIRD_PARTY_NOTICES.txt",to:"THIRD_PARTY_NOTICES.txt"}],win:{target:[{target:"nsis",arch:["x64"]}],icon:"public/icon.ico",artifactName:"Resenhazinha-Setup-${version}.${ext}"},nsis:{oneClick:false,allowToChangeInstallationDirectory:true,createDesktopShortcut:"always",createStartMenuShortcut:true,shortcutName:"Resenhazinha",runAfterFinish:true,deleteAppDataOnUninstall:false},publish:[{provider:"github",owner:"Yazzdyz",repo:"Resenhazinha-DC-2.0",releaseType:"release",tagNamePrefix:"v"}]}; fs.writeFileSync("package.json",JSON.stringify(p,null,2)+"\n");'
 
       - name: Instalar dependências
-        run: npm ci
+        run: npm install
 
-      - name: Montar aplicativo Windows
+      - name: Montar Setup e publicar release
         run: npm run package:win
-
-      - name: Criar ZIP do Windows
-        shell: pwsh
-        run: |
-          Compress-Archive -Path "release/Resenhazinha-win32-x64/*" -DestinationPath "$env:RELEASE_ASSET" -CompressionLevel Optimal
-
-      - name: Criar ou atualizar GitHub Release
-        shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release view "$env:RELEASE_TAG" --repo "${{ github.repository }}" *> $null
-          if ($LASTEXITCODE -ne 0) {
-            gh release create "$env:RELEASE_TAG" --repo "${{ github.repository }}" --target "${{ github.sha }}" --title "Resenhazinha $env:RELEASE_TAG" --generate-notes
-          }
-          gh release upload "$env:RELEASE_TAG" "$env:RELEASE_ASSET" --repo "${{ github.repository }}" --clobber
+
+      - name: Guardar instalador como artefato do Actions
+        uses: actions/upload-artifact@v4
+        with:
+          name: Resenhazinha-Setup-${{ env.APP_VERSION }}
+          path: |
+            release/Resenhazinha-Setup-*.exe
+            release/Resenhazinha-Setup-*.exe.blockmap
+            release/latest.yml
+          if-no-files-found: error
