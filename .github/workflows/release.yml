@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 env:
-  APP_VERSION: "3.0.6"
+  APP_VERSION: "3.1.0"
 
 jobs:
   windows-release:
@@ -54,6 +54,19 @@ jobs:
           $encoded = (Get-Content ".github/apply-server-menu-v3.0.6.py.gz.b64" -Raw).Trim()
           $gzipPath = Join-Path $env:RUNNER_TEMP "apply-server-menu-v306.py.gz"
           $scriptPath = Join-Path $env:RUNNER_TEMP "apply-server-menu-v306.py"
+          [IO.File]::WriteAllBytes($gzipPath, [Convert]::FromBase64String($encoded))
+          python -c "import gzip,sys; open(sys.argv[2],'wb').write(gzip.open(sys.argv[1],'rb').read())" "$gzipPath" "$scriptPath"
+          python "$scriptPath"
+          node --check src/main.js
+          node --check electron/main.cjs
+          node --check electron/preload.cjs
+
+      - name: Aplicar voz e mixers 0 a 200
+        shell: pwsh
+        run: |
+          $encoded = (Get-Content ".github/apply-voice-mixer-v3.1.0.py.gz.b64" -Raw).Trim()
+          $gzipPath = Join-Path $env:RUNNER_TEMP "apply-voice-mixer-v310.py.gz"
+          $scriptPath = Join-Path $env:RUNNER_TEMP "apply-voice-mixer-v310.py"
           [IO.File]::WriteAllBytes($gzipPath, [Convert]::FromBase64String($encoded))
           python -c "import gzip,sys; open(sys.argv[2],'wb').write(gzip.open(sys.argv[1],'rb').read())" "$gzipPath" "$scriptPath"
           python "$scriptPath"
