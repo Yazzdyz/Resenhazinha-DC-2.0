@@ -20,7 +20,7 @@ jobs:
       - name: Aplicar atualização preparada
         shell: pwsh
         run: |
-          $encoded = (Get-Content .github/build-patch.gz.b64 -Raw).Trim()
+          $encoded = (Get-ChildItem ".github/patch-parts/*.txt" | Sort-Object Name | ForEach-Object { (Get-Content $_.FullName -Raw).Trim() }) -join ""
           $gzipPath = Join-Path $env:RUNNER_TEMP "resenhazinha.patch.gz"
           $patchPath = Join-Path $env:RUNNER_TEMP "resenhazinha.patch"
           [IO.File]::WriteAllBytes($gzipPath, [Convert]::FromBase64String($encoded))
