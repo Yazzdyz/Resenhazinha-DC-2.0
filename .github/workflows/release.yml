@@ -40,12 +40,13 @@ jobs:
       - name: Aplicar sair e excluir servidor
         shell: pwsh
         run: |
-          $encoded = (Get-Content ".github/server-exit-v3.0.5.patch.gz.b64" -Raw).Trim()
-          $gzipPath = Join-Path $env:RUNNER_TEMP "server-exit.patch.gz"
-          $patchPath = Join-Path $env:RUNNER_TEMP "server-exit.patch"
+          $encoded = (Get-Content ".github/apply-server-exit-v3.0.5.py.gz.b64" -Raw).Trim()
+          $gzipPath = Join-Path $env:RUNNER_TEMP "apply-server-exit.py.gz"
+          $scriptPath = Join-Path $env:RUNNER_TEMP "apply-server-exit.py"
           [IO.File]::WriteAllBytes($gzipPath, [Convert]::FromBase64String($encoded))
-          python -c "import gzip,sys; open(sys.argv[2],'wb').write(gzip.open(sys.argv[1],'rb').read())" "$gzipPath" "$patchPath"
-          git apply --whitespace=nowarn $patchPath
+          python -c "import gzip,sys; open(sys.argv[2],'wb').write(gzip.open(sys.argv[1],'rb').read())" "$gzipPath" "$scriptPath"
+          python "$scriptPath"
+          node --check src/main.js
 
       - name: Restaurar sons clássicos do Discord
         shell: pwsh
