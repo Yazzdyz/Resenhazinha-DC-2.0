@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 env:
-  APP_VERSION: "3.0.5"
+  APP_VERSION: "3.0.6"
 
 jobs:
   windows-release:
@@ -47,6 +47,19 @@ jobs:
           python -c "import gzip,sys; open(sys.argv[2],'wb').write(gzip.open(sys.argv[1],'rb').read())" "$gzipPath" "$scriptPath"
           python "$scriptPath"
           node --check src/main.js
+
+      - name: Aplicar menu visível do servidor
+        shell: pwsh
+        run: |
+          $encoded = (Get-Content ".github/apply-server-menu-v3.0.6.py.gz.b64" -Raw).Trim()
+          $gzipPath = Join-Path $env:RUNNER_TEMP "apply-server-menu-v306.py.gz"
+          $scriptPath = Join-Path $env:RUNNER_TEMP "apply-server-menu-v306.py"
+          [IO.File]::WriteAllBytes($gzipPath, [Convert]::FromBase64String($encoded))
+          python -c "import gzip,sys; open(sys.argv[2],'wb').write(gzip.open(sys.argv[1],'rb').read())" "$gzipPath" "$scriptPath"
+          python "$scriptPath"
+          node --check src/main.js
+          node --check electron/main.cjs
+          node --check electron/preload.cjs
 
       - name: Restaurar sons clássicos do Discord
         shell: pwsh
