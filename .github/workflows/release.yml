@@ -27,18 +27,22 @@ jobs:
             "05.txt", "06.txt", "07.txt", "08.txt"
           )
           $parts = $partNames | ForEach-Object { Get-Item (Join-Path ".github/patch-parts" $_) }
-          foreach ($part in $parts) {
-            $text = (Get-Content $part.FullName -Raw).Trim()
-            $bytes = [Text.Encoding]::UTF8.GetBytes($text)
-            $hash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes)).ToLower()
-            Write-Host "$($part.Name) $($text.Length) $hash"
-          }
           $encoded = ($parts | ForEach-Object { (Get-Content $_.FullName -Raw).Trim() }) -join ""
           $gzipPath = Join-Path $env:RUNNER_TEMP "resenhazinha.patch.gz"
           $patchPath = Join-Path $env:RUNNER_TEMP "resenhazinha.patch"
           [IO.File]::WriteAllBytes($gzipPath, [Convert]::FromBase64String($encoded))
           python -c "import gzip,sys; open(sys.argv[2],'wb').write(gzip.open(sys.argv[1],'rb').read())" "$gzipPath" "$patchPath"
           git apply --whitespace=nowarn $patchPath
+
+      - name: Restaurar sons clássicos do Discord
+        shell: pwsh
+        run: |
+          $path = "src/main.js"
+          $content = Get-Content $path -Raw
+          $content = $content.Replace('voiceLeave: "https://www.myinstants.com/media/sounds/y2mate_VKI8qDn.mp3"', 'voiceLeave: "https://www.myinstants.com/media/sounds/discord-leave-noise.mp3"')
+          $content = $content.Replace('screenStart: null,', 'screenStart: "https://www.myinstants.com/media/sounds/discord-stream-start_7MsfgpB.mp3",')
+          $content = $content.Replace('screenStop: null,', 'screenStop: "https://www.myinstants.com/media/sounds/discord-stream-stop.mp3",')
+          Set-Content -Path $path -Value $content -NoNewline -Encoding utf8
 
       - name: Preparar Node.js
         uses: actions/setup-node@v4
