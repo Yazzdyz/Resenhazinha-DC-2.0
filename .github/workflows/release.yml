@@ -13,7 +13,7 @@ permissions:
   contents: write
 
 env:
-  APP_VERSION: "3.2.0"
+  APP_VERSION: "3.2.1"
 
 jobs:
   windows-release:
@@ -86,6 +86,21 @@ jobs:
           [IO.File]::WriteAllBytes($gzipPath, [Convert]::FromBase64String($encoded))
           python -c "import gzip,sys; open(sys.argv[2],'wb').write(gzip.open(sys.argv[1],'rb').read())" "$gzipPath" "$scriptPath"
           python "$scriptPath"
+          node --check src/main.js
+          node --check public/mic-noise-worklet.js
+          node --check electron/main.cjs
+          node --check electron/preload.cjs
+
+      - name: Aplicar interface e fullscreen v3.2.1
+        shell: pwsh
+        run: |
+          $encoded = (Get-Content ".github/apply-ui-v3.2.1.patch.gz.b64" -Raw).Trim()
+          $gzipPath = Join-Path $env:RUNNER_TEMP "apply-ui-v321.patch.gz"
+          $patchPath = Join-Path $env:RUNNER_TEMP "apply-ui-v321.patch"
+          [IO.File]::WriteAllBytes($gzipPath, [Convert]::FromBase64String($encoded))
+          python -c "import gzip,sys; open(sys.argv[2],'wb').write(gzip.open(sys.argv[1],'rb').read())" "$gzipPath" "$patchPath"
+          git apply --whitespace=nowarn $patchPath
+          git diff --check
           node --check src/main.js
           node --check public/mic-noise-worklet.js
           node --check electron/main.cjs
