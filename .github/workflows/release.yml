@@ -13,7 +13,7 @@ permissions:
   contents: write
 
 env:
-  APP_VERSION: "3.3.0"
+  APP_VERSION: "3.3.1"
 
 jobs:
   windows-release:
@@ -112,6 +112,21 @@ jobs:
           $encoded = (Get-Content ".github/apply-voice-presence-v3.3.0.patch.gz.b64" -Raw).Trim()
           $gzipPath = Join-Path $env:RUNNER_TEMP "apply-voice-presence-v330.patch.gz"
           $patchPath = Join-Path $env:RUNNER_TEMP "apply-voice-presence-v330.patch"
+          [IO.File]::WriteAllBytes($gzipPath, [Convert]::FromBase64String($encoded))
+          python -c "import gzip,sys; open(sys.argv[2],'wb').write(gzip.open(sys.argv[1],'rb').read())" "$gzipPath" "$patchPath"
+          git apply --whitespace=nowarn $patchPath
+          git diff --check
+          node --check src/main.js
+          node --check public/mic-noise-worklet.js
+          node --check electron/main.cjs
+          node --check electron/preload.cjs
+
+      - name: Aplicar estabilidade da call v3.3.1
+        shell: pwsh
+        run: |
+          $encoded = (Get-Content ".github/apply-stability-v3.3.1.patch.gz.b64" -Raw).Trim()
+          $gzipPath = Join-Path $env:RUNNER_TEMP "apply-stability-v331.patch.gz"
+          $patchPath = Join-Path $env:RUNNER_TEMP "apply-stability-v331.patch"
           [IO.File]::WriteAllBytes($gzipPath, [Convert]::FromBase64String($encoded))
           python -c "import gzip,sys; open(sys.argv[2],'wb').write(gzip.open(sys.argv[1],'rb').read())" "$gzipPath" "$patchPath"
           git apply --whitespace=nowarn $patchPath
