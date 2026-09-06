@@ -11,51 +11,63 @@ permissions:
 
 jobs:
   inspect:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
       - name: Baixar código
         uses: actions/checkout@v4
 
-      - name: Aplicar base preparada
-        shell: bash
+      - name: Aplicar atualização preparada
+        shell: pwsh
         run: |
-          python - <<'PY'
-          from pathlib import Path
-          import base64,gzip
-          names=["01.txt","02.txt","03.txt","04r1.txt","04r2.txt","04r3.txt","04r4.txt","04fix2.txt","04fix3.txt","04fix4.txt","04fix5.txt","04fix6.txt","04fix7.txt","05.txt","06.txt","07.txt","08.txt"]
-          enc=''.join(Path('.github/patch-parts',n).read_text().strip() for n in names)
-          Path('/tmp/base.patch').write_bytes(gzip.decompress(base64.b64decode(enc)))
-          PY
-          git apply --whitespace=nowarn /tmp/base.patch
+          $partNames = @(
+            "01.txt", "02.txt", "03.txt",
+            "04r1.txt", "04r2.txt", "04r3.txt", "04r4.txt",
+            "04fix2.txt", "04fix3.txt", "04fix4.txt", "04fix5.txt", "04fix6.txt", "04fix7.txt",
+            "05.txt", "06.txt", "07.txt", "08.txt"
+          )
+          $parts = $partNames | ForEach-Object { Get-Item (Join-Path ".github/patch-parts" $_) }
+          $encoded = ($parts | ForEach-Object { (Get-Content $_.FullName -Raw).Trim() }) -join ""
+          $gzipPath = Join-Path $env:RUNNER_TEMP "resenhazinha.patch.gz"
+          $patchPath = Join-Path $env:RUNNER_TEMP "resenhazinha.patch"
+          [IO.File]::WriteAllBytes($gzipPath, [Convert]::FromBase64String($encoded))
+          python -c "import gzip,sys; open(sys.argv[2],'wb').write(gzip.open(sys.argv[1],'rb').read())" "$gzipPath" "$patchPath"
+          git apply --whitespace=nowarn $patchPath
 
-      - name: Aplicar patches Python antigos
-        shell: bash
+      - name: Aplicar patches Python
+        shell: pwsh
         run: |
-          python - <<'PY'
-          from pathlib import Path
-          import base64,gzip,subprocess
-          for src,out in [
-            ('.github/apply-server-exit-v3.0.5.py.gz.b64','/tmp/p1.py'),
-            ('.github/apply-server-menu-v3.0.6.py.gz.b64','/tmp/p2.py'),
-            ('.github/apply-voice-mixer-v3.1.0.py.gz.b64','/tmp/p3.py'),
-            ('.github/apply-resenhazinha-v3.2.0.py.gz.b64','/tmp/p4.py')]:
-              Path(out).write_bytes(gzip.decompress(base64.b64decode(Path(src).read_text().strip())))
-              subprocess.run(['python',out],check=True)
-          PY
+          $items = @(
+            @(".github/apply-server-exit-v3.0.5.py.gz.b64", "server-exit.py"),
+            @(".github/apply-server-menu-v3.0.6.py.gz.b64", "server-menu.py"),
+            @(".github/apply-voice-mixer-v3.1.0.py.gz.b64", "voice-mixer.py"),
+            @(".github/apply-resenhazinha-v3.2.0.py.gz.b64", "v320.py")
+          )
+          foreach ($item in $items) {
+            $encoded = (Get-Content $item[0] -Raw).Trim()
+            $gzipPath = Join-Path $env:RUNNER_TEMP ($item[1] + ".gz")
+            $scriptPath = Join-Path $env:RUNNER_TEMP $item[1]
+            [IO.File]::WriteAllBytes($gzipPath, [Convert]::FromBase64String($encoded))
+            python -c "import gzip,sys; open(sys.argv[2],'wb').write(gzip.open(sys.argv[1],'rb').read())" "$gzipPath" "$scriptPath"
+            python "$scriptPath"
+          }
 
       - name: Aplicar patches recentes
-        shell: bash
+        shell: pwsh
         run: |
-          python - <<'PY'
-          from pathlib import Path
-          import base64,gzip,subprocess
-          for src,out in [
-            ('.github/apply-ui-v3.2.1.patch.gz.b64','/tmp/ui.patch'),
-            ('.github/apply-voice-presence-v3.3.0.patch.gz.b64','/tmp/voice.patch'),
-            ('.github/apply-stability-v3.3.1.patch.gz.b64','/tmp/stability.patch')]:
-              Path(out).write_bytes(gzip.decompress(base64.b64decode(Path(src).read_text().strip())))
-              subprocess.run(['git','apply','--whitespace=nowarn',out],check=True)
-          PY
+          $items = @(
+            @(".github/apply-ui-v3.2.1.patch.gz.b64", "ui.patch"),
+            @(".github/apply-voice-presence-v3.3.0.patch.gz.b64", "voice.patch"),
+            @(".github/apply-stability-v3.3.1.patch.gz.b64", "stability.patch")
+          )
+          foreach ($item in $items) {
+            $encoded = (Get-Content $item[0] -Raw).Trim()
+            $gzipPath = Join-Path $env:RUNNER_TEMP ($item[1] + ".gz")
+            $patchPath = Join-Path $env:RUNNER_TEMP $item[1]
+            [IO.File]::WriteAllBytes($gzipPath, [Convert]::FromBase64String($encoded))
+            python -c "import gzip,sys; open(sys.argv[2],'wb').write(gzip.open(sys.argv[1],'rb').read())" "$gzipPath" "$patchPath"
+            git apply --whitespace=nowarn $patchPath
+          }
+          git diff --check
           node --check src/main.js
           node --check electron/main.cjs
           node --check electron/preload.cjs
