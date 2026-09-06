@@ -51,13 +51,14 @@ jobs:
             python "$scriptPath"
           }
 
-      - name: Aplicar patches recentes
+      - name: Aplicar patches recentes e hotfix
         shell: pwsh
         run: |
           $items = @(
             @(".github/apply-ui-v3.2.1.patch.gz.b64", "ui.patch"),
             @(".github/apply-voice-presence-v3.3.0.patch.gz.b64", "voice.patch"),
-            @(".github/apply-stability-v3.3.1.patch.gz.b64", "stability.patch")
+            @(".github/apply-stability-v3.3.1.patch.gz.b64", "stability.patch"),
+            @(".github/apply-hotfix-v3.3.2.patch.gz.b64", "hotfix332.patch")
           )
           foreach ($item in $items) {
             $encoded = (Get-Content $item[0] -Raw).Trim()
@@ -72,10 +73,21 @@ jobs:
           node --check electron/main.cjs
           node --check electron/preload.cjs
 
+      - name: Preparar Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Validar build
+        run: |
+          npm install
+          npm run build
+
       - name: Guardar fonte montada
         uses: actions/upload-artifact@v4
         with:
-          name: patched-source-3.3.1
+          name: patched-source-3.3.2-test
           path: |
             src/main.js
             electron/main.cjs
