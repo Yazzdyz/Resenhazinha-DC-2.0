@@ -24,11 +24,7 @@ jobs:
           $gzipPath = Join-Path $env:RUNNER_TEMP "resenhazinha.patch.gz"
           $patchPath = Join-Path $env:RUNNER_TEMP "resenhazinha.patch"
           [IO.File]::WriteAllBytes($gzipPath, [Convert]::FromBase64String($encoded))
-          $input = [IO.File]::OpenRead($gzipPath)
-          $output = [IO.File]::Create($patchPath)
-          $gzip = [IO.Compression.GZipStream]::new($input, [IO.Compression.CompressionMode]::Decompress)
-          $gzip.CopyTo($output)
-          $gzip.Dispose(); $output.Dispose(); $input.Dispose()
+          python -c "import gzip,sys; open(sys.argv[2],'wb').write(gzip.open(sys.argv[1],'rb').read())" "$gzipPath" "$patchPath"
           git apply --whitespace=nowarn $patchPath
 
       - name: Preparar Node.js
