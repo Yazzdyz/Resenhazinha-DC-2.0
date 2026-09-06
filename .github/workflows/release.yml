@@ -13,7 +13,7 @@ permissions:
   contents: write
 
 env:
-  APP_VERSION: "3.1.0"
+  APP_VERSION: "3.2.0"
 
 jobs:
   windows-release:
@@ -74,6 +74,20 @@ jobs:
           python -c "import gzip,sys; open(sys.argv[2],'wb').write(gzip.open(sys.argv[1],'rb').read())" "$gzipPath" "$scriptPath"
           python "$scriptPath"
           node --check src/main.js
+          node --check electron/main.cjs
+          node --check electron/preload.cjs
+
+      - name: Aplicar revisão de áudio e configurações
+        shell: pwsh
+        run: |
+          $encoded = (Get-Content ".github/apply-resenhazinha-v3.2.0.py.gz.b64" -Raw).Trim()
+          $gzipPath = Join-Path $env:RUNNER_TEMP "apply-resenhazinha-v320.py.gz"
+          $scriptPath = Join-Path $env:RUNNER_TEMP "apply-resenhazinha-v320.py"
+          [IO.File]::WriteAllBytes($gzipPath, [Convert]::FromBase64String($encoded))
+          python -c "import gzip,sys; open(sys.argv[2],'wb').write(gzip.open(sys.argv[1],'rb').read())" "$gzipPath" "$scriptPath"
+          python "$scriptPath"
+          node --check src/main.js
+          node --check public/mic-noise-worklet.js
           node --check electron/main.cjs
           node --check electron/preload.cjs
 
