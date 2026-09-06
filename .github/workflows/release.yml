@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      - ".github/inspect/**"
+      - ".github/workflows/inspect-patched.yml"
   workflow_dispatch:
 
 permissions:
