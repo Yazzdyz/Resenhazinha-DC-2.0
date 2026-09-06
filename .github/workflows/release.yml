@@ -2,8 +2,9 @@ name: Publicar versão do Resenhazinha
 
 on:
   push:
-    tags:
-      - "v*.*.*"
+    branches:
+      - main
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -16,11 +17,33 @@ jobs:
       - name: Baixar código
         uses: actions/checkout@v4
 
+      - name: Aplicar atualização preparada
+        shell: pwsh
+        run: |
+          $encoded = (Get-Content .github/build-patch.gz.b64 -Raw).Trim()
+          $gzipPath = Join-Path $env:RUNNER_TEMP "resenhazinha.patch.gz"
+          $patchPath = Join-Path $env:RUNNER_TEMP "resenhazinha.patch"
+          [IO.File]::WriteAllBytes($gzipPath, [Convert]::FromBase64String($encoded))
+          $input = [IO.File]::OpenRead($gzipPath)
+          $output = [IO.File]::Create($patchPath)
+          $gzip = [IO.Compression.GZipStream]::new($input, [IO.Compression.CompressionMode]::Decompress)
+          $gzip.CopyTo($output)
+          $gzip.Dispose(); $output.Dispose(); $input.Dispose()
+          git apply --whitespace=nowarn $patchPath
+
       - name: Preparar Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
+
+      - name: Ler versão
+        shell: pwsh
+        run: |
+          $version = (Get-Content ./package.json -Raw | ConvertFrom-Json).version
+          $tag = "v$version"
+          "RELEASE_TAG=$tag" >> $env:GITHUB_ENV
+          "RELEASE_ASSET=Resenhazinha-$tag-Windows.zip" >> $env:GITHUB_ENV
 
       - name: Instalar dependências
         run: npm ci
@@ -31,19 +54,15 @@ jobs:
       - name: Criar ZIP do Windows
         shell: pwsh
         run: |
-          $tag = "${{ github.ref_name }}"
-          $asset = "Resenhazinha-$tag-Windows.zip"
-          Compress-Archive -Path "release/Resenhazinha-win32-x64/*" -DestinationPath $asset -CompressionLevel Optimal
-          "RELEASE_ASSET=$asset" >> $env:GITHUB_ENV
+          Compress-Archive -Path "release/Resenhazinha-win32-x64/*" -DestinationPath "$env:RELEASE_ASSET" -CompressionLevel Optimal
 
       - name: Criar ou atualizar GitHub Release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = "${{ github.ref_name }}"
-          gh release view $tag --repo "${{ github.repository }}" *> $null
+          gh release view "$env:RELEASE_TAG" --repo "${{ github.repository }}" *> $null
           if ($LASTEXITCODE -ne 0) {
-            gh release create $tag --repo "${{ github.repository }}" --title "Resenhazinha $tag" --generate-notes
+            gh release create "$env:RELEASE_TAG" --repo "${{ github.repository }}" --target "${{ github.sha }}" --title "Resenhazinha $env:RELEASE_TAG" --generate-notes
           }
-          gh release upload $tag "$env:RELEASE_ASSET" --repo "${{ github.repository }}" --clobber
+          gh release upload "$env:RELEASE_TAG" "$env:RELEASE_ASSET" --repo "${{ github.repository }}" --clobber
