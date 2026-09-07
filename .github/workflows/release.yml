@@ -13,7 +13,7 @@ permissions:
   contents: write
 
 env:
-  APP_VERSION: "3.3.3"
+  APP_VERSION: "4.0.0"
 
 jobs:
   windows-release:
@@ -92,6 +92,22 @@ jobs:
           [IO.File]::WriteAllBytes($gzipPath, [Convert]::FromBase64String($encoded))
           python -c "import gzip,sys; open(sys.argv[2],'wb').write(gzip.open(sys.argv[1],'rb').read())" "$gzipPath" "$scriptPath"
           python "$scriptPath"
+          git diff --check
+          node --check src/main.js
+          node --check public/mic-noise-worklet.js
+          node --check electron/main.cjs
+          node --check electron/preload.cjs
+
+      - name: Aplicar servidor em nuvem v4.0.0
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $encoded = (Get-Content ".github/apply-cloud-v4.0.0.patch.gz.b64" -Raw).Trim()
+          $gzipPath = Join-Path $env:RUNNER_TEMP "apply-cloud-v400.patch.gz"
+          $patchPath = Join-Path $env:RUNNER_TEMP "apply-cloud-v400.patch"
+          [IO.File]::WriteAllBytes($gzipPath, [Convert]::FromBase64String($encoded))
+          python -c "import gzip,sys; open(sys.argv[2],'wb').write(gzip.open(sys.argv[1],'rb').read())" "$gzipPath" "$patchPath"
+          git apply --whitespace=nowarn $patchPath
           git diff --check
           node --check src/main.js
           node --check public/mic-noise-worklet.js
