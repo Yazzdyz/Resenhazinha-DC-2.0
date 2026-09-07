@@ -13,7 +13,7 @@ permissions:
   contents: write
 
 env:
-  APP_VERSION: "3.3.2"
+  APP_VERSION: "3.3.3"
 
 jobs:
   windows-release:
@@ -23,128 +23,75 @@ jobs:
       - name: Baixar código
         uses: actions/checkout@v4
 
-      - name: Aplicar atualização preparada
+      - name: Aplicar atualização base
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
           $partNames = @(
             "01.txt", "02.txt", "03.txt",
             "04r1.txt", "04r2.txt", "04r3.txt", "04r4.txt",
             "04fix2.txt", "04fix3.txt", "04fix4.txt", "04fix5.txt", "04fix6.txt", "04fix7.txt",
             "05.txt", "06.txt", "07.txt", "08.txt"
           )
-          $parts = $partNames | ForEach-Object { Get-Item (Join-Path ".github/patch-parts" $_) }
-          $encoded = ($parts | ForEach-Object { (Get-Content $_.FullName -Raw).Trim() }) -join ""
-          $gzipPath = Join-Path $env:RUNNER_TEMP "resenhazinha.patch.gz"
-          $patchPath = Join-Path $env:RUNNER_TEMP "resenhazinha.patch"
+          $encoded = ($partNames | ForEach-Object { (Get-Content (Join-Path ".github/patch-parts" $_) -Raw).Trim() }) -join ""
+          $gzipPath = Join-Path $env:RUNNER_TEMP "resenhazinha-base.patch.gz"
+          $patchPath = Join-Path $env:RUNNER_TEMP "resenhazinha-base.patch"
           [IO.File]::WriteAllBytes($gzipPath, [Convert]::FromBase64String($encoded))
           python -c "import gzip,sys; open(sys.argv[2],'wb').write(gzip.open(sys.argv[1],'rb').read())" "$gzipPath" "$patchPath"
           git apply --whitespace=nowarn $patchPath
 
-      - name: Aplicar sair e excluir servidor
+      - name: Aplicar atualizações Python
         shell: pwsh
         run: |
-          $encoded = (Get-Content ".github/apply-server-exit-v3.0.5.py.gz.b64" -Raw).Trim()
-          $gzipPath = Join-Path $env:RUNNER_TEMP "apply-server-exit.py.gz"
-          $scriptPath = Join-Path $env:RUNNER_TEMP "apply-server-exit.py"
+          $ErrorActionPreference = "Stop"
+          $scripts = @(
+            ".github/apply-server-exit-v3.0.5.py.gz.b64",
+            ".github/apply-server-menu-v3.0.6.py.gz.b64",
+            ".github/apply-voice-mixer-v3.1.0.py.gz.b64",
+            ".github/apply-resenhazinha-v3.2.0.py.gz.b64"
+          )
+          $index = 0
+          foreach ($src in $scripts) {
+            $index++
+            $encoded = (Get-Content $src -Raw).Trim()
+            $gzipPath = Join-Path $env:RUNNER_TEMP "resenhazinha-python-$index.py.gz"
+            $scriptPath = Join-Path $env:RUNNER_TEMP "resenhazinha-python-$index.py"
+            [IO.File]::WriteAllBytes($gzipPath, [Convert]::FromBase64String($encoded))
+            python -c "import gzip,sys; open(sys.argv[2],'wb').write(gzip.open(sys.argv[1],'rb').read())" "$gzipPath" "$scriptPath"
+            python "$scriptPath"
+          }
+
+      - name: Aplicar atualizações recentes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $patches = @(
+            ".github/apply-ui-v3.2.1.patch.gz.b64",
+            ".github/apply-voice-presence-v3.3.0.patch.gz.b64",
+            ".github/apply-stability-v3.3.1.patch.gz.b64",
+            ".github/apply-hotfix-v3.3.2.patch.gz.b64"
+          )
+          $index = 0
+          foreach ($src in $patches) {
+            $index++
+            $encoded = (Get-Content $src -Raw).Trim()
+            $gzipPath = Join-Path $env:RUNNER_TEMP "resenhazinha-patch-$index.patch.gz"
+            $patchPath = Join-Path $env:RUNNER_TEMP "resenhazinha-patch-$index.patch"
+            [IO.File]::WriteAllBytes($gzipPath, [Convert]::FromBase64String($encoded))
+            python -c "import gzip,sys; open(sys.argv[2],'wb').write(gzip.open(sys.argv[1],'rb').read())" "$gzipPath" "$patchPath"
+            git apply --whitespace=nowarn $patchPath
+          }
+
+      - name: Aplicar roteamento de voz v3.3.3
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $encoded = (Get-Content ".github/apply-voice-routing-v3.3.3.py.gz.b64" -Raw).Trim()
+          $gzipPath = Join-Path $env:RUNNER_TEMP "apply-voice-routing-v333.py.gz"
+          $scriptPath = Join-Path $env:RUNNER_TEMP "apply-voice-routing-v333.py"
           [IO.File]::WriteAllBytes($gzipPath, [Convert]::FromBase64String($encoded))
           python -c "import gzip,sys; open(sys.argv[2],'wb').write(gzip.open(sys.argv[1],'rb').read())" "$gzipPath" "$scriptPath"
           python "$scriptPath"
-          node --check src/main.js
-
-      - name: Aplicar menu visível do servidor
-        shell: pwsh
-        run: |
-          $encoded = (Get-Content ".github/apply-server-menu-v3.0.6.py.gz.b64" -Raw).Trim()
-          $gzipPath = Join-Path $env:RUNNER_TEMP "apply-server-menu-v306.py.gz"
-          $scriptPath = Join-Path $env:RUNNER_TEMP "apply-server-menu-v306.py"
-          [IO.File]::WriteAllBytes($gzipPath, [Convert]::FromBase64String($encoded))
-          python -c "import gzip,sys; open(sys.argv[2],'wb').write(gzip.open(sys.argv[1],'rb').read())" "$gzipPath" "$scriptPath"
-          python "$scriptPath"
-          node --check src/main.js
-          node --check electron/main.cjs
-          node --check electron/preload.cjs
-
-      - name: Aplicar voz e mixers 0 a 200
-        shell: pwsh
-        run: |
-          $encoded = (Get-Content ".github/apply-voice-mixer-v3.1.0.py.gz.b64" -Raw).Trim()
-          $gzipPath = Join-Path $env:RUNNER_TEMP "apply-voice-mixer-v310.py.gz"
-          $scriptPath = Join-Path $env:RUNNER_TEMP "apply-voice-mixer-v310.py"
-          [IO.File]::WriteAllBytes($gzipPath, [Convert]::FromBase64String($encoded))
-          python -c "import gzip,sys; open(sys.argv[2],'wb').write(gzip.open(sys.argv[1],'rb').read())" "$gzipPath" "$scriptPath"
-          python "$scriptPath"
-          node --check src/main.js
-          node --check electron/main.cjs
-          node --check electron/preload.cjs
-
-      - name: Aplicar revisão de áudio e configurações
-        shell: pwsh
-        run: |
-          $encoded = (Get-Content ".github/apply-resenhazinha-v3.2.0.py.gz.b64" -Raw).Trim()
-          $gzipPath = Join-Path $env:RUNNER_TEMP "apply-resenhazinha-v320.py.gz"
-          $scriptPath = Join-Path $env:RUNNER_TEMP "apply-resenhazinha-v320.py"
-          [IO.File]::WriteAllBytes($gzipPath, [Convert]::FromBase64String($encoded))
-          python -c "import gzip,sys; open(sys.argv[2],'wb').write(gzip.open(sys.argv[1],'rb').read())" "$gzipPath" "$scriptPath"
-          python "$scriptPath"
-          node --check src/main.js
-          node --check public/mic-noise-worklet.js
-          node --check electron/main.cjs
-          node --check electron/preload.cjs
-
-      - name: Aplicar interface e fullscreen v3.2.1
-        shell: pwsh
-        run: |
-          $encoded = (Get-Content ".github/apply-ui-v3.2.1.patch.gz.b64" -Raw).Trim()
-          $gzipPath = Join-Path $env:RUNNER_TEMP "apply-ui-v321.patch.gz"
-          $patchPath = Join-Path $env:RUNNER_TEMP "apply-ui-v321.patch"
-          [IO.File]::WriteAllBytes($gzipPath, [Convert]::FromBase64String($encoded))
-          python -c "import gzip,sys; open(sys.argv[2],'wb').write(gzip.open(sys.argv[1],'rb').read())" "$gzipPath" "$patchPath"
-          git apply --whitespace=nowarn $patchPath
-          git diff --check
-          node --check src/main.js
-          node --check public/mic-noise-worklet.js
-          node --check electron/main.cjs
-          node --check electron/preload.cjs
-
-      - name: Aplicar presença de voz e câmera v3.3.0
-        shell: pwsh
-        run: |
-          $encoded = (Get-Content ".github/apply-voice-presence-v3.3.0.patch.gz.b64" -Raw).Trim()
-          $gzipPath = Join-Path $env:RUNNER_TEMP "apply-voice-presence-v330.patch.gz"
-          $patchPath = Join-Path $env:RUNNER_TEMP "apply-voice-presence-v330.patch"
-          [IO.File]::WriteAllBytes($gzipPath, [Convert]::FromBase64String($encoded))
-          python -c "import gzip,sys; open(sys.argv[2],'wb').write(gzip.open(sys.argv[1],'rb').read())" "$gzipPath" "$patchPath"
-          git apply --whitespace=nowarn $patchPath
-          git diff --check
-          node --check src/main.js
-          node --check public/mic-noise-worklet.js
-          node --check electron/main.cjs
-          node --check electron/preload.cjs
-
-      - name: Aplicar estabilidade da call v3.3.1
-        shell: pwsh
-        run: |
-          $encoded = (Get-Content ".github/apply-stability-v3.3.1.patch.gz.b64" -Raw).Trim()
-          $gzipPath = Join-Path $env:RUNNER_TEMP "apply-stability-v331.patch.gz"
-          $patchPath = Join-Path $env:RUNNER_TEMP "apply-stability-v331.patch"
-          [IO.File]::WriteAllBytes($gzipPath, [Convert]::FromBase64String($encoded))
-          python -c "import gzip,sys; open(sys.argv[2],'wb').write(gzip.open(sys.argv[1],'rb').read())" "$gzipPath" "$patchPath"
-          git apply --whitespace=nowarn $patchPath
-          git diff --check
-          node --check src/main.js
-          node --check public/mic-noise-worklet.js
-          node --check electron/main.cjs
-          node --check electron/preload.cjs
-
-      - name: Aplicar hotfix de persistência e áudio v3.3.2
-        shell: pwsh
-        run: |
-          $encoded = (Get-Content ".github/apply-hotfix-v3.3.2.patch.gz.b64" -Raw).Trim()
-          $gzipPath = Join-Path $env:RUNNER_TEMP "apply-hotfix-v332.patch.gz"
-          $patchPath = Join-Path $env:RUNNER_TEMP "apply-hotfix-v332.patch"
-          [IO.File]::WriteAllBytes($gzipPath, [Convert]::FromBase64String($encoded))
-          python -c "import gzip,sys; open(sys.argv[2],'wb').write(gzip.open(sys.argv[1],'rb').read())" "$gzipPath" "$patchPath"
-          git apply --whitespace=nowarn $patchPath
           git diff --check
           node --check src/main.js
           node --check public/mic-noise-worklet.js
@@ -199,7 +146,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             gh release create $tag --repo "${{ github.repository }}" --target $env:GITHUB_SHA --title "Resenhazinha $tag"
           }
-          gh release upload $tag "release/Resenhazinha-Setup-$env:APP_VERSION.exe" "release/Resenhazinha-Setup-$env:APP_VERSION.exe.blockmap" "release/latest.yml" --repo "${{ github.repository }}" --clobber
+          gh release upload $tag `
+            "release/Resenhazinha-Setup-$env:APP_VERSION.exe" `
+            "release/Resenhazinha-Setup-$env:APP_VERSION.exe.blockmap" `
+            "release/latest.yml" `
+            --repo "${{ github.repository }}" --clobber
 
       - name: Guardar instalador como artefato do Actions
         uses: actions/upload-artifact@v4
