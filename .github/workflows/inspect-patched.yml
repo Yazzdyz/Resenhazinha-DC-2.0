@@ -1,0 +1,122 @@
+name: Inspecionar fonte montado v4.1.0
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - name: Baixar código
+        uses: actions/checkout@v4
+
+      - name: Aplicar atualização base
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $partNames = @(
+            "01.txt", "02.txt", "03.txt",
+            "04r1.txt", "04r2.txt", "04r3.txt", "04r4.txt",
+            "04fix2.txt", "04fix3.txt", "04fix4.txt", "04fix5.txt", "04fix6.txt", "04fix7.txt",
+            "05.txt", "06.txt", "07.txt", "08.txt"
+          )
+          $encoded = ($partNames | ForEach-Object { (Get-Content (Join-Path ".github/patch-parts" $_) -Raw).Trim() }) -join ""
+          $gzipPath = Join-Path $env:RUNNER_TEMP "base.patch.gz"
+          $patchPath = Join-Path $env:RUNNER_TEMP "base.patch"
+          [IO.File]::WriteAllBytes($gzipPath, [Convert]::FromBase64String($encoded))
+          python -c "import gzip,sys; open(sys.argv[2],'wb').write(gzip.open(sys.argv[1],'rb').read())" "$gzipPath" "$patchPath"
+          git apply --whitespace=nowarn $patchPath
+
+      - name: Aplicar atualizações Python
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $scripts = @(
+            ".github/apply-server-exit-v3.0.5.py.gz.b64",
+            ".github/apply-server-menu-v3.0.6.py.gz.b64",
+            ".github/apply-voice-mixer-v3.1.0.py.gz.b64",
+            ".github/apply-resenhazinha-v3.2.0.py.gz.b64"
+          )
+          $i = 0
+          foreach ($src in $scripts) {
+            $i++
+            $encoded = (Get-Content $src -Raw).Trim()
+            $gz = Join-Path $env:RUNNER_TEMP "p$i.py.gz"
+            $py = Join-Path $env:RUNNER_TEMP "p$i.py"
+            [IO.File]::WriteAllBytes($gz, [Convert]::FromBase64String($encoded))
+            python -c "import gzip,sys; open(sys.argv[2],'wb').write(gzip.open(sys.argv[1],'rb').read())" "$gz" "$py"
+            python "$py"
+          }
+
+      - name: Aplicar patches recentes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $patches = @(
+            ".github/apply-ui-v3.2.1.patch.gz.b64",
+            ".github/apply-voice-presence-v3.3.0.patch.gz.b64",
+            ".github/apply-stability-v3.3.1.patch.gz.b64",
+            ".github/apply-hotfix-v3.3.2.patch.gz.b64"
+          )
+          $i = 0
+          foreach ($src in $patches) {
+            $i++
+            $encoded = (Get-Content $src -Raw).Trim()
+            $gz = Join-Path $env:RUNNER_TEMP "r$i.patch.gz"
+            $patch = Join-Path $env:RUNNER_TEMP "r$i.patch"
+            [IO.File]::WriteAllBytes($gz, [Convert]::FromBase64String($encoded))
+            python -c "import gzip,sys; open(sys.argv[2],'wb').write(gzip.open(sys.argv[1],'rb').read())" "$gz" "$patch"
+            git apply --whitespace=nowarn $patch
+          }
+
+      - name: Aplicar v3.3.3 e v4
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $encoded = (Get-Content ".github/apply-voice-routing-v3.3.3.py.gz.b64" -Raw).Trim()
+          $gz = Join-Path $env:RUNNER_TEMP "v333.py.gz"
+          $py = Join-Path $env:RUNNER_TEMP "v333.py"
+          [IO.File]::WriteAllBytes($gz, [Convert]::FromBase64String($encoded))
+          python -c "import gzip,sys; open(sys.argv[2],'wb').write(gzip.open(sys.argv[1],'rb').read())" "$gz" "$py"
+          python "$py"
+
+          $encoded = (Get-Content ".github/apply-cloud-v4.0.0.patch.gz.b64" -Raw).Trim()
+          $gz = Join-Path $env:RUNNER_TEMP "v400.patch.gz"
+          $patch = Join-Path $env:RUNNER_TEMP "v400.patch"
+          [IO.File]::WriteAllBytes($gz, [Convert]::FromBase64String($encoded))
+          python -c "import gzip,sys; open(sys.argv[2],'wb').write(gzip.open(sys.argv[1],'rb').read())" "$gz" "$patch"
+          git apply --whitespace=nowarn $patch
+
+          $encoded = (Get-Content ".github/apply-cloud-csp-v4.0.1.py.gz.b64" -Raw).Trim()
+          $gz = Join-Path $env:RUNNER_TEMP "v401.py.gz"
+          $py = Join-Path $env:RUNNER_TEMP "v401.py"
+          [IO.File]::WriteAllBytes($gz, [Convert]::FromBase64String($encoded))
+          python -c "import gzip,sys; open(sys.argv[2],'wb').write(gzip.open(sys.argv[1],'rb').read())" "$gz" "$py"
+          python "$py"
+
+          $encoded = (Get-Content ".github/apply-profile-sync-v4.0.2.patch.gz.b64" -Raw).Trim()
+          $gz = Join-Path $env:RUNNER_TEMP "v402.patch.gz"
+          $patch = Join-Path $env:RUNNER_TEMP "v402.patch"
+          [IO.File]::WriteAllBytes($gz, [Convert]::FromBase64String($encoded))
+          python -c "import gzip,sys; open(sys.argv[2],'wb').write(gzip.open(sys.argv[1],'rb').read())" "$gz" "$patch"
+          git apply --whitespace=nowarn $patch
+
+          $encoded = (Get-Content ".github/apply-chat-v4.1.0.py.gz.b64" -Raw).Trim()
+          $gz = Join-Path $env:RUNNER_TEMP "v410.py.gz"
+          $py = Join-Path $env:RUNNER_TEMP "v410.py"
+          [IO.File]::WriteAllBytes($gz, [Convert]::FromBase64String($encoded))
+          python -c "import gzip,sys; open(sys.argv[2],'wb').write(gzip.open(sys.argv[1],'rb').read())" "$gz" "$py"
+          python "$py"
+          node --check src/main.js
+
+      - name: Guardar fonte montado
+        uses: actions/upload-artifact@v4
+        with:
+          name: patched-source-v4.1.0
+          path: |
+            src/main.js
+            src/styles.css
+            index.html
+          if-no-files-found: error
