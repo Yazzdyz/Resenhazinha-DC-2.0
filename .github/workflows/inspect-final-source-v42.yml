@@ -1,0 +1,74 @@
+name: Inspecionar fonte final v4.2
+
+on:
+  push:
+    branches:
+      - inspect/audio-mixer-v42
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Aplicar cadeia de patches
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import base64, gzip, subprocess, tempfile
+
+          def decode(src, out):
+              raw = Path(src).read_text().strip()
+              Path(out).write_bytes(gzip.decompress(base64.b64decode(raw)))
+
+          names = [
+              "01.txt", "02.txt", "03.txt",
+              "04r1.txt", "04r2.txt", "04r3.txt", "04r4.txt",
+              "04fix2.txt", "04fix3.txt", "04fix4.txt", "04fix5.txt", "04fix6.txt", "04fix7.txt",
+              "05.txt", "06.txt", "07.txt", "08.txt",
+          ]
+          encoded = ''.join(Path('.github/patch-parts', n).read_text().strip() for n in names)
+          base_patch = gzip.decompress(base64.b64decode(encoded))
+          Path('/tmp/base.patch').write_bytes(base_patch)
+          subprocess.run(['git','apply','--whitespace=nowarn','/tmp/base.patch'], check=True)
+
+          py_scripts = [
+              '.github/apply-server-exit-v3.0.5.py.gz.b64',
+              '.github/apply-server-menu-v3.0.6.py.gz.b64',
+              '.github/apply-voice-mixer-v3.1.0.py.gz.b64',
+              '.github/apply-resenhazinha-v3.2.0.py.gz.b64',
+          ]
+          for i, src in enumerate(py_scripts):
+              out=f'/tmp/script-{i}.py'; decode(src,out); subprocess.run(['python',out], check=True)
+
+          patch_files = [
+              '.github/apply-ui-v3.2.1.patch.gz.b64',
+              '.github/apply-voice-presence-v3.3.0.patch.gz.b64',
+              '.github/apply-stability-v3.3.1.patch.gz.b64',
+              '.github/apply-hotfix-v3.3.2.patch.gz.b64',
+          ]
+          for i, src in enumerate(patch_files):
+              out=f'/tmp/patch-{i}.patch'; decode(src,out); subprocess.run(['git','apply','--whitespace=nowarn',out], check=True)
+
+          out='/tmp/voice-routing.py'; decode('.github/apply-voice-routing-v3.3.3.py.gz.b64',out); subprocess.run(['python',out], check=True)
+          out='/tmp/cloud.patch'; decode('.github/apply-cloud-v4.0.0.patch.gz.b64',out); subprocess.run(['git','apply','--whitespace=nowarn',out], check=True)
+          out='/tmp/cloud-csp.py'; decode('.github/apply-cloud-csp-v4.0.1.py.gz.b64',out); subprocess.run(['python',out], check=True)
+          out='/tmp/profile.patch'; decode('.github/apply-profile-sync-v4.0.2.patch.gz.b64',out); subprocess.run(['git','apply','--whitespace=nowarn',out], check=True)
+          out='/tmp/chat.py'; decode('.github/apply-chat-v4.1.0.py.gz.b64',out); subprocess.run(['python',out], check=True)
+          out='/tmp/chat-polish.patch'; decode('.github/apply-chat-polish-v4.1.1.patch.gz.b64',out); subprocess.run(['git','apply','--whitespace=nowarn',out], check=True)
+          subprocess.run(['python','.github/apply-v4.2.0.py'], check=True)
+          PY
+          node --check src/main.js
+
+      - name: Guardar fonte final
+        uses: actions/upload-artifact@v4
+        with:
+          name: patched-source-v42
+          path: |
+            src/main.js
+            index.html
