@@ -13,7 +13,7 @@ permissions:
   contents: write
 
 env:
-  APP_VERSION: "4.2.2"
+  APP_VERSION: "4.2.3"
 
 jobs:
   windows-release:
@@ -211,6 +211,22 @@ jobs:
           node --check src/v4.2.2.js
           $index = Get-Content "index.html" -Raw
           if ($index -notmatch '/src/v4.2.2.js') { throw "Módulo v4.2.2 não foi injetado." }
+
+      - name: Aplicar janela maximizada e fullscreen real v4.2.3
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          python ".github/apply-v4.2.3.py"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git diff --check
+          node --check electron/main.cjs
+          node --check electron/preload.cjs
+          node --check src/v4.2.2.js
+          $main = Get-Content "electron/main.cjs" -Raw
+          $preload = Get-Content "electron/preload.cjs" -Raw
+          if ($main -notmatch 'mainWindow\.maximize\(\)') { throw "Abertura maximizada não foi aplicada." }
+          if ($main -notmatch 'setFullScreen\(target\)') { throw "Fullscreen real não foi aplicado." }
+          if ($preload -notmatch 'setWindowFullscreen') { throw "Bridge de fullscreen não foi aplicada." }
 
       - name: Preparar Node.js
         uses: actions/setup-node@v4
