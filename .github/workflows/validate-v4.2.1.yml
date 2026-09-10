@@ -1,0 +1,20 @@
+name: Validar mixer v4.2.1
+
+on:
+  push:
+    branches:
+      - release/v4.2.1
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - name: Baixar código
+        uses: actions/checkout@v4
+
+      - name: Aplicar cadeia real e validar hotfix
+        shell: pwsh
+        run: .github/validate-v4.2.1.ps1
