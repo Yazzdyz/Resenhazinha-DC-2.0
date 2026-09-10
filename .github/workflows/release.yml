@@ -13,7 +13,7 @@ permissions:
   contents: write
 
 env:
-  APP_VERSION: "4.2.5"
+  APP_VERSION: "4.2.6"
 
 jobs:
   windows-release:
@@ -256,6 +256,25 @@ jobs:
           if ($main -notmatch 'titleBarStyle: "hidden"') { throw "Titlebar integrada não foi aplicada." }
           if ($main -notmatch 'titleBarOverlay:') { throw "Overlay dos controles da janela não foi aplicado." }
           if ($index -notmatch '/src/v4.2.5.js') { throw "Módulo visual v4.2.5 não foi injetado." }
+
+      - name: Aplicar titlebar compacta v4.2.6
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          python ".github/apply-v4.2.6.py"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git diff --check
+          node --check electron/main.cjs
+          node --check electron/preload.cjs
+          node --check src/v4.2.6.js
+          $main = Get-Content "electron/main.cjs" -Raw
+          $preload = Get-Content "electron/preload.cjs" -Raw
+          $index = Get-Content "index.html" -Raw
+          if ($main -notmatch 'frame: false') { throw "Janela frameless não foi aplicada." }
+          if ($main -match 'titleBarOverlay:') { throw "Titlebar nativa antiga ainda está ativa." }
+          if ($main -notmatch 'resenhazinha:window-action') { throw "IPC dos controles da janela não foi aplicado." }
+          if ($preload -notmatch 'windowAction') { throw "Bridge dos controles da janela não foi aplicada." }
+          if ($index -notmatch '/src/v4.2.6.js') { throw "Módulo v4.2.6 não foi injetado." }
 
       - name: Preparar Node.js
         uses: actions/setup-node@v4
