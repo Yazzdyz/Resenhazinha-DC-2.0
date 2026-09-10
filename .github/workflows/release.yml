@@ -13,7 +13,7 @@ permissions:
   contents: write
 
 env:
-  APP_VERSION: "4.2.3"
+  APP_VERSION: "4.2.4"
 
 jobs:
   windows-release:
@@ -227,6 +227,20 @@ jobs:
           if ($main -notmatch 'mainWindow\.maximize\(\)') { throw "Abertura maximizada não foi aplicada." }
           if ($main -notmatch 'setFullScreen\(target\)') { throw "Fullscreen real não foi aplicado." }
           if ($preload -notmatch 'setWindowFullscreen') { throw "Bridge de fullscreen não foi aplicada." }
+
+      - name: Remover reconexões automáticas v4.2.4
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          python ".github/apply-v4.2.4.py"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git diff --check
+          node --check src/main.js
+          $main = Get-Content "src/main.js" -Raw
+          if ($main -match 'state\.peer\.reconnect\(\)') { throw "Ainda existe reconnect do PeerJS." }
+          if ($main -match 'connectToHost\(true\)') { throw "Ainda existe reconnect automático com o host." }
+          if ($main -notmatch 'voiceReconnectBlockedPeers') { throw "Bloqueio de reconexão de voz não foi aplicado." }
+          if ($main -notmatch 'screenReconnectBlockedPeers') { throw "Bloqueio de reconexão de tela não foi aplicado." }
 
       - name: Preparar Node.js
         uses: actions/setup-node@v4
