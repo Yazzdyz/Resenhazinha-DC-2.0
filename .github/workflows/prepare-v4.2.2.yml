@@ -1,0 +1,75 @@
+name: Preparar v4.2.2
+
+on:
+  push:
+    branches:
+      - release/v4.2.2
+    paths:
+      - ".github/workflows/prepare-v4.2.2.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixar código
+        uses: actions/checkout@v4
+        with:
+          ref: release/v4.2.2
+
+      - name: Atualizar release para v4.2.2
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/workflows/release.yml')
+          text = path.read_text(encoding='utf-8')
+          old = '  APP_VERSION: "4.2.1"'
+          new = '  APP_VERSION: "4.2.2"'
+          if old in text:
+              text = text.replace(old, new, 1)
+          elif new not in text:
+              raise SystemExit('Não encontrei APP_VERSION 4.2.1 no workflow')
+
+          step = '''      - name: Aplicar fullscreen e emojis v4.2.2
+            shell: pwsh
+            run: |
+              $ErrorActionPreference = "Stop"
+              python ".github/apply-v4.2.2.py"
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+              git diff --check
+              node --check src/v4.2.2.js
+              $index = Get-Content "index.html" -Raw
+              if ($index -notmatch '/src/v4.2.2.js') { throw "Módulo v4.2.2 não foi injetado." }
+
+'''
+          anchor = '      - name: Preparar Node.js\n'
+          if 'Aplicar fullscreen e emojis v4.2.2' not in text:
+              if anchor not in text:
+                  raise SystemExit('Não encontrei o ponto de inserção antes de Preparar Node.js')
+              text = text.replace(anchor, step + anchor, 1)
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+          node --check src/v4.2.2.js
+          python -m py_compile .github/apply-v4.2.2.py
+          git diff --check
+
+      - name: Salvar alteração na branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/release.yml
+          if git diff --cached --quiet; then
+            echo "Workflow já estava preparado."
+            exit 0
+          fi
+          git commit -m "Prepara publicação da v4.2.2"
+          git push origin HEAD:release/v4.2.2
