@@ -296,10 +296,9 @@ jobs:
           git diff --check
           node --check src/main.js
           $main = Get-Content "src/main.js" -Raw
-          if ($main -match 'connection\.on\("close", \(\) => removeGuest\(connection\.peer\)\)') { throw "Close ainda remove convidado diretamente." }
-          if ($main -match 'connection\.on\("error", \(\) => removeGuest\(connection\.peer\)\)') { throw "Error ainda remove convidado diretamente." }
-          if ($main -notmatch 'handleGuestControlDisconnect') { throw "Proteção do canal de controle não foi aplicada." }
-          if ($main -notmatch 'guestHasLiveMedia') { throw "Detecção de mídia ativa não foi aplicada." }
+          if ($main -notmatch 'function guestHasLiveMedia\(peerId\)') { throw "Detecção de mídia ativa não foi aplicada." }
+          if ($main -notmatch 'if \(guestHasLiveMedia\(peerId\)\)') { throw "removeGuest ainda não protege mídia ativa." }
+          if ($main -notmatch 'Controle do convidado caiu; mídia continua ativa') { throw "Proteção contra queda do controle não foi aplicada." }
 
       - name: Preparar Node.js
         uses: actions/setup-node@v4
