@@ -14,8 +14,6 @@ def replace_function(name: str, replacement: str, required: bool = True):
     return count
 
 
-# Estado usado somente para impedir que uma chamada que CAIU seja recriada
-# automaticamente. A primeira conexão continua normal.
 if "voiceReconnectBlockedPeers" not in text:
     text, count = re.subn(
         r"(  voiceCalls: new Map\(\),\n)",
@@ -27,20 +25,18 @@ if "voiceReconnectBlockedPeers" not in text:
         raise SystemExit("v4.2.4: não encontrei voiceCalls para adicionar bloqueios")
 
 
-# 1) Sem reconnect automático de PeerJS / host.
-# Algumas versões intermediárias da cadeia já removem parte disso, então a
-# ausência de um trecho já removido NÃO é erro.
+# Sem timer de reconnect automático com o host. Se uma etapa anterior já tirou,
+# a ausência é considerada válida.
 replace_function(
     "scheduleHostReconnect",
     '''function scheduleHostReconnect() {
-  // v4.2.4: reconexão automática desativada.
   window.clearTimeout(state.reconnectTimer);
   state.reconnectTimer = null;
 }''',
     required=False,
 )
 
-# Handler PeerJS: não chama peer.reconnect().
+# Remove qualquer forma de PeerJS reconnect, independente de como o if foi escrito.
 text = re.sub(
     r'state\.peer\.on\("disconnected",\s*\(\)\s*=>\s*\{[^\n]*?state\.peer\.reconnect\(\);?[^\n]*?\}\);',
     'state.peer.on("disconnected", () => { setConnectionState("Desconectado", "warning"); });',
@@ -49,14 +45,13 @@ text = re.sub(
 )
 text = text.replace("if (!state.peer.destroyed) state.peer.reconnect();", "")
 text = text.replace("if (!state.peer?.destroyed) state.peer.reconnect();", "")
+text = text.replace("state.peer.reconnect()", "undefined")
 
-# Qualquer chamada explícita ao modo reconnect do host é desativada.
+# Sem reconnect automático com host.
 text = text.replace("connectToHost(true);", "")
 text = text.replace("scheduleHostReconnect();", "")
 
-# Se o canal de CONTROLE com o host fechar, não derruba a mídia que já está
-# rodando. Procura especificamente o close da hostConnection e remove apenas
-# o teardown de voz/tela desse bloco.
+# Se cair só o canal de controle, não derruba call/tela que já estavam vivas.
 close_pattern = re.compile(
     r'  connection\.on\("close", \(\) => \{.*?\n  \}\);(?=\n  connection\.on\("error")',
     re.DOTALL,
@@ -77,13 +72,10 @@ for match in list(close_pattern.finditer(text)):
     text = text[:match.start()] + cleaned + text[match.end():]
     break
 
-# Erros de host também não disparam reconnect.
 text = text.replace("else scheduleHostReconnect();", 'else setConnectionState("Servidor offline", "warning");')
 
 
-# 2) Voz: a conexão inicial é criada normalmente. Se uma MediaConnection cair
-# enquanto os dois ainda estão marcados na call, aquele peer fica bloqueado até
-# uma ação manual (sair/entrar de novo).
+# Voz: conexão inicial normal; se cair depois, não recria automaticamente.
 replace_function(
     "reconcileVoiceCalls",
     '''function reconcileVoiceCalls() {
@@ -111,7 +103,6 @@ replace_function(
 }''',
 )
 
-# Não aceita uma recriação entrante de voz para um peer bloqueado.
 voice_answer = '  call.answer(state.localStream || new MediaStream()); registerVoiceCall(call);'
 if voice_answer in text and "voiceReconnectBlockedPeers.has(call.peer)" not in text:
     text = text.replace(
@@ -136,7 +127,6 @@ replace_function(
 }''',
 )
 
-# Entrar manualmente na call libera uma conexão nova.
 join_anchor = '''async function joinVoiceChannel() {
   if (!state.server.voiceChannel.exists || state.inVoice) { if (state.server.voiceChannel.exists) switchView("voice"); return; }'''
 if join_anchor in text and "state.voiceReconnectBlockedPeers.clear();" not in text[text.find(join_anchor):text.find(join_anchor) + 500]:
@@ -147,8 +137,7 @@ if join_anchor in text and "state.voiceReconnectBlockedPeers.clear();" not in te
     )
 
 
-# 3) Tela: mesma regra. Primeira abertura funciona; se o WebRTC da tela cair,
-# não recria sozinho. O usuário precisa parar/iniciar a transmissão novamente.
+# Tela: conexão inicial normal; queda inesperada não é recriada automaticamente.
 share_anchor = '''function beginScreenShare(stream) {
   state.screenStream = stream;'''
 if share_anchor in text:
@@ -194,7 +183,6 @@ replace_function(
 }''',
 )
 
-# Bloqueia uma tentativa de reabrir automaticamente uma tela recebida que caiu.
 screen_previous = '    const previousCall = state.screenCallsIn.get(call.peer);'
 if screen_previous in text and "screenInboundReconnectBlockedPeers.has(call.peer)" not in text:
     text = text.replace(
@@ -219,7 +207,6 @@ if old_screen_close in text:
         1,
     )
 
-# Um screen-stopped real libera o próximo compartilhamento manual.
 text = text.replace(
     'if (message.type === "screen-stopped") { state.activeScreens.delete(peerId);',
     'if (message.type === "screen-stopped") { state.screenInboundReconnectBlockedPeers.delete(peerId); state.activeScreens.delete(peerId);',
@@ -227,7 +214,6 @@ text = text.replace(
 )
 
 
-# Garantias finais da v4.2.4.
 if "state.peer.reconnect()" in text:
     raise SystemExit("v4.2.4: ainda existe state.peer.reconnect()")
 if "connectToHost(true)" in text:
