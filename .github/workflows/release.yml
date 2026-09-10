@@ -13,7 +13,7 @@ permissions:
   contents: write
 
 env:
-  APP_VERSION: "4.2.7"
+  APP_VERSION: "4.2.8"
 
 jobs:
   windows-release:
@@ -286,6 +286,20 @@ jobs:
           node --check electron/main.cjs
           $main = Get-Content "electron/main.cjs" -Raw
           if ($main -match 'mainWindow\.on\("maximize", sendWindowState\);') { throw "Listener prematuro ainda existe." }
+
+      - name: Proteger call contra queda do controle v4.2.8
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          python ".github/apply-v4.2.8.py"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git diff --check
+          node --check src/main.js
+          $main = Get-Content "src/main.js" -Raw
+          if ($main -match 'connection\.on\("close", \(\) => removeGuest\(connection\.peer\)\)') { throw "Close ainda remove convidado diretamente." }
+          if ($main -match 'connection\.on\("error", \(\) => removeGuest\(connection\.peer\)\)') { throw "Error ainda remove convidado diretamente." }
+          if ($main -notmatch 'handleGuestControlDisconnect') { throw "Proteção do canal de controle não foi aplicada." }
+          if ($main -notmatch 'guestHasLiveMedia') { throw "Detecção de mídia ativa não foi aplicada." }
 
       - name: Preparar Node.js
         uses: actions/setup-node@v4
