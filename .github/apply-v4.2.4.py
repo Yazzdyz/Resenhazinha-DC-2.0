@@ -5,87 +5,99 @@ path = Path("src/main.js")
 text = path.read_text(encoding="utf-8")
 
 
-def sub_once(pattern, replacement, label, flags=0):
+def replace_function(name: str, replacement: str, required: bool = True):
     global text
-    text, count = re.subn(pattern, replacement, text, count=1, flags=flags)
+    pattern = re.compile(rf"function {re.escape(name)}\([^\n]*\) \{{.*?\n\}}", re.DOTALL)
+    text, count = pattern.subn(replacement, text, count=1)
+    if required and count != 1:
+        raise SystemExit(f"v4.2.4: não encontrei {name} (count={count})")
+    return count
+
+
+# Estado usado somente para impedir que uma chamada que CAIU seja recriada
+# automaticamente. A primeira conexão continua normal.
+if "voiceReconnectBlockedPeers" not in text:
+    text, count = re.subn(
+        r"(  voiceCalls: new Map\(\),\n)",
+        r"\1  voiceReconnectBlockedPeers: new Set(),\n  screenReconnectBlockedPeers: new Set(),\n  screenInboundReconnectBlockedPeers: new Set(),\n",
+        text,
+        count=1,
+    )
     if count != 1:
-        raise SystemExit(f"v4.2.4: não encontrei {label} (count={count})")
+        raise SystemExit("v4.2.4: não encontrei voiceCalls para adicionar bloqueios")
 
 
-# Marca conexões de mídia que caíram inesperadamente. Enquanto o usuário não
-# fizer uma ação manual (sair/entrar na call ou reiniciar a tela), elas não
-# serão recriadas automaticamente.
-sub_once(
-    r'(  voiceCalls: new Map\(\),\n)',
-    r'\1  voiceReconnectBlockedPeers: new Set(),\n  screenReconnectBlockedPeers: new Set(),\n  screenInboundReconnectBlockedPeers: new Set(),\n',
-    'estado de bloqueio de reconexão',
-)
-
-# Sem timer de reconexão automática com o host.
-sub_once(
-    r'function scheduleHostReconnect\(\) \{.*?\n\}',
+# 1) Sem reconnect automático de PeerJS / host.
+# Algumas versões intermediárias da cadeia já removem parte disso, então a
+# ausência de um trecho já removido NÃO é erro.
+replace_function(
+    "scheduleHostReconnect",
     '''function scheduleHostReconnect() {
-  // v4.2.4: reconexão automática desativada de propósito.
+  // v4.2.4: reconexão automática desativada.
   window.clearTimeout(state.reconnectTimer);
   state.reconnectTimer = null;
 }''',
-    'scheduleHostReconnect',
+    required=False,
+)
+
+# Handler PeerJS: não chama peer.reconnect().
+text = re.sub(
+    r'state\.peer\.on\("disconnected",\s*\(\)\s*=>\s*\{[^\n]*?state\.peer\.reconnect\(\);?[^\n]*?\}\);',
+    'state.peer.on("disconnected", () => { setConnectionState("Desconectado", "warning"); });',
+    text,
+    count=1,
+)
+text = text.replace("if (!state.peer.destroyed) state.peer.reconnect();", "")
+text = text.replace("if (!state.peer?.destroyed) state.peer.reconnect();", "")
+
+# Qualquer chamada explícita ao modo reconnect do host é desativada.
+text = text.replace("connectToHost(true);", "")
+text = text.replace("scheduleHostReconnect();", "")
+
+# Se o canal de CONTROLE com o host fechar, não derruba a mídia que já está
+# rodando. Procura especificamente o close da hostConnection e remove apenas
+# o teardown de voz/tela desse bloco.
+close_pattern = re.compile(
+    r'  connection\.on\("close", \(\) => \{.*?\n  \}\);(?=\n  connection\.on\("error")',
     re.DOTALL,
 )
+for match in list(close_pattern.finditer(text)):
+    block = match.group(0)
+    if "state.hostConnection === connection" not in block:
+        continue
+    cleaned = block
+    cleaned = cleaned.replace("      closeAllMediaCalls();\n", "")
+    cleaned = cleaned.replace("      state.inVoice = false;\n", "")
+    cleaned = re.sub(r"\s*state\.localStream\?\.getTracks\(\)\.forEach\(\(track\) => track\.stop\(\)\);\s*state\.localStream = null;", "", cleaned)
+    cleaned = cleaned.replace("      applyLocalAudioState(); updateControlState();\n", "")
+    cleaned = re.sub(r"\s*state\.members = state\.members\.filter\([^\n]*\);", "", cleaned)
+    cleaned = cleaned.replace("      renderMembers(); renderVoiceGrid();\n", "")
+    cleaned = cleaned.replace("      scheduleHostReconnect();\n", "")
+    cleaned = cleaned.replace("reconecta quando ele voltar.", "a call atual não será reiniciada automaticamente.")
+    text = text[:match.start()] + cleaned + text[match.end():]
+    break
 
-# Sem PeerJS reconnect automático.
-sub_once(
-    r'  state\.peer\.on\("disconnected", \(\) => \{ setConnectionState\("Reconectando…", "warning"\); if \(!state\.peer\.destroyed\) state\.peer\.reconnect\(\); \}\);',
-    '  state.peer.on("disconnected", () => { setConnectionState("Desconectado", "warning"); });',
-    'peer.reconnect',
-)
+# Erros de host também não disparam reconnect.
+text = text.replace("else scheduleHostReconnect();", 'else setConnectionState("Servidor offline", "warning");')
 
-# Timeout depois de já estar dentro do servidor: somente informa, não tenta de novo.
-text = text.replace(
-    '''    } else if (!connection.open && state.roomEntered) {
-      setConnectionState("Servidor offline", "warning");
-      scheduleHostReconnect();
-    }
-  }, isReconnect ? 6500 : 10000);''',
-    '''    } else if (!connection.open && state.roomEntered) {
-      setConnectionState("Servidor offline", "warning");
-    }
-  }, 10000);''',
-    1,
-)
 
-# Se o canal de controle com o host cair, NÃO derruba a call/tela que já está
-# rodando e NÃO tenta reconectar. Assim uma oscilação de sinalização não força
-# o amigo a abrir a transmissão outra vez.
-sub_once(
-    r'''  connection\.on\("close", \(\) => \{\n    if \(state\.hostConnection === connection\) state\.hostConnection = null;\n    if \(state\.roomEntered\) \{.*?\n    \}\n  \}\);\n  connection\.on\("error", \(\) => \{\n    if \(!state\.roomEntered\) setLobbyStatus\((.*?)\);\n    else scheduleHostReconnect\(\);\n  \}\);''',
-    r'''  connection.on("close", () => {
-    if (state.hostConnection === connection) state.hostConnection = null;
-    if (state.roomEntered) {
-      setConnectionState("Servidor offline", "warning");
-      toast("A conexão com o servidor caiu. A call e as transmissões atuais não serão reiniciadas automaticamente.", "error");
-    }
-  });
-  connection.on("error", () => {
-    if (!state.roomEntered) setLobbyStatus(\1);
-    else setConnectionState("Servidor offline", "warning");
-  });''',
-    'close/error do host',
-    re.DOTALL,
-)
-
-# Voz: cria a conexão inicial normalmente, mas uma conexão que caiu enquanto os
-# dois ainda estavam marcados na call não é recriada sozinha.
-sub_once(
-    r'function reconcileVoiceCalls\(\) \{.*?\n\}',
+# 2) Voz: a conexão inicial é criada normalmente. Se uma MediaConnection cair
+# enquanto os dois ainda estão marcados na call, aquele peer fica bloqueado até
+# uma ação manual (sair/entrar de novo).
+replace_function(
+    "reconcileVoiceCalls",
     '''function reconcileVoiceCalls() {
   if (!state.peer?.open || !state.localStream) return;
   const activeIds = new Set(state.members.filter((member) => member.inVoice).map((member) => member.peerId));
-  state.voiceReconnectBlockedPeers.forEach((peerId) => { if (!activeIds.has(peerId)) state.voiceReconnectBlockedPeers.delete(peerId); });
+  state.voiceReconnectBlockedPeers.forEach((peerId) => {
+    if (!activeIds.has(peerId)) state.voiceReconnectBlockedPeers.delete(peerId);
+  });
   state.voiceCalls.forEach((call, peerId) => {
     if (!activeIds.has(peerId)) {
       state.voiceReconnectBlockedPeers.delete(peerId);
-      call.close(); state.voiceCalls.delete(peerId); removeRemoteAudio(peerId);
+      call.close();
+      state.voiceCalls.delete(peerId);
+      removeRemoteAudio(peerId);
     }
   });
   if (!state.inVoice) return;
@@ -97,20 +109,19 @@ sub_once(
     }
   });
 }''',
-    'reconcileVoiceCalls',
-    re.DOTALL,
 )
 
-# Bloqueia chamadas de voz entrantes que seriam apenas uma tentativa automática
-# de recriar uma conexão que já caiu.
-text = text.replace(
-    '''  const caller = state.members.find((member) => member.peerId === call.peer); if (!state.inVoice || !state.server.voiceChannel.exists || (caller && !caller.inVoice) || state.voiceCalls.has(call.peer)) { call.close(); return; }''',
-    '''  const caller = state.members.find((member) => member.peerId === call.peer); if (!state.inVoice || !state.server.voiceChannel.exists || (caller && !caller.inVoice) || state.voiceCalls.has(call.peer) || state.voiceReconnectBlockedPeers.has(call.peer)) { call.close(); return; }''',
-    1,
-)
+# Não aceita uma recriação entrante de voz para um peer bloqueado.
+voice_answer = '  call.answer(state.localStream || new MediaStream()); registerVoiceCall(call);'
+if voice_answer in text and "voiceReconnectBlockedPeers.has(call.peer)" not in text:
+    text = text.replace(
+        voice_answer,
+        '  if (state.voiceReconnectBlockedPeers.has(call.peer)) { call.close(); return; }\n' + voice_answer,
+        1,
+    )
 
-sub_once(
-    r'function registerVoiceCall\(call\) \{.*?\n\}',
+replace_function(
+    "registerVoiceCall",
     '''function registerVoiceCall(call) {
   state.voiceCalls.set(call.peer, call);
   call.on("stream", (stream) => attachRemoteAudio(call.peer, stream));
@@ -123,53 +134,45 @@ sub_once(
   call.on("close", markDropped);
   call.on("error", markDropped);
 }''',
-    'registerVoiceCall',
-    re.DOTALL,
 )
 
-# Uma entrada manual na call libera novas conexões iniciais.
-text = text.replace(
-    '''async function joinVoiceChannel() {
-  if (!state.server.voiceChannel.exists || state.inVoice) { if (state.server.voiceChannel.exists) switchView("voice"); return; }''',
-    '''async function joinVoiceChannel() {
-  if (!state.server.voiceChannel.exists || state.inVoice) { if (state.server.voiceChannel.exists) switchView("voice"); return; }
-  state.voiceReconnectBlockedPeers.clear();
-  state.screenInboundReconnectBlockedPeers.clear();''',
-    1,
-)
+# Entrar manualmente na call libera uma conexão nova.
+join_anchor = '''async function joinVoiceChannel() {
+  if (!state.server.voiceChannel.exists || state.inVoice) { if (state.server.voiceChannel.exists) switchView("voice"); return; }'''
+if join_anchor in text and "state.voiceReconnectBlockedPeers.clear();" not in text[text.find(join_anchor):text.find(join_anchor) + 500]:
+    text = text.replace(
+        join_anchor,
+        join_anchor + '\n  state.voiceReconnectBlockedPeers.clear();\n  state.screenInboundReconnectBlockedPeers.clear();',
+        1,
+    )
 
-text = text.replace(
-    '''  state.inVoice = false;
-  applyLocalAudioState();''',
-    '''  state.inVoice = false;
-  state.voiceReconnectBlockedPeers.clear();
-  state.screenReconnectBlockedPeers.clear();
-  state.screenInboundReconnectBlockedPeers.clear();
-  applyLocalAudioState();''',
-    1,
-)
 
-# Tela enviada: inicia normalmente quando o usuário clica em compartilhar, mas
-# se o WebRTC daquela transmissão cair não é recriado automaticamente.
-text = text.replace(
-    '''function beginScreenShare(stream) {
-  state.screenStream = stream;''',
-    '''function beginScreenShare(stream) {
+# 3) Tela: mesma regra. Primeira abertura funciona; se o WebRTC da tela cair,
+# não recria sozinho. O usuário precisa parar/iniciar a transmissão novamente.
+share_anchor = '''function beginScreenShare(stream) {
+  state.screenStream = stream;'''
+if share_anchor in text:
+    text = text.replace(
+        share_anchor,
+        '''function beginScreenShare(stream) {
   state.screenReconnectBlockedPeers.clear();
   state.screenStream = stream;''',
-    1,
-)
+        1,
+    )
 
-sub_once(
-    r'function reconcileScreenCalls\(\) \{.*?\n\}',
+replace_function(
+    "reconcileScreenCalls",
     '''function reconcileScreenCalls() {
   if (!state.screenStream || !state.peer?.open || !state.inVoice) return;
   const activeIds = new Set(state.members.filter((member) => member.inVoice).map((member) => member.peerId));
-  state.screenReconnectBlockedPeers.forEach((peerId) => { if (!activeIds.has(peerId)) state.screenReconnectBlockedPeers.delete(peerId); });
+  state.screenReconnectBlockedPeers.forEach((peerId) => {
+    if (!activeIds.has(peerId)) state.screenReconnectBlockedPeers.delete(peerId);
+  });
   state.screenCallsOut.forEach((call, peerId) => {
     if (!activeIds.has(peerId)) {
       state.screenReconnectBlockedPeers.delete(peerId);
-      call.close(); state.screenCallsOut.delete(peerId);
+      call.close();
+      state.screenCallsOut.delete(peerId);
     }
   });
   const profile = shareProfile();
@@ -180,39 +183,31 @@ sub_once(
     state.screenCallsOut.set(member.peerId, call);
     tuneScreenCall(call);
     const markDropped = () => {
-      if (state.screenStream && state.inVoice && state.members.some((item) => item.peerId === member.peerId && item.inVoice)) state.screenReconnectBlockedPeers.add(member.peerId);
+      if (state.screenStream && state.inVoice && state.members.some((item) => item.peerId === member.peerId && item.inVoice)) {
+        state.screenReconnectBlockedPeers.add(member.peerId);
+      }
       if (state.screenCallsOut.get(member.peerId) === call) state.screenCallsOut.delete(member.peerId);
     };
     call.on("close", markDropped);
     call.on("error", markDropped);
   });
 }''',
-    'reconcileScreenCalls',
-    re.DOTALL,
 )
 
-text = text.replace(
-    '''function stopScreenShare() {
-  if (!state.screenStream) return;''',
-    '''function stopScreenShare() {
-  if (!state.screenStream) return;
-  state.screenReconnectBlockedPeers.clear();''',
-    1,
-)
+# Bloqueia uma tentativa de reabrir automaticamente uma tela recebida que caiu.
+screen_previous = '    const previousCall = state.screenCallsIn.get(call.peer);'
+if screen_previous in text and "screenInboundReconnectBlockedPeers.has(call.peer)" not in text:
+    text = text.replace(
+        screen_previous,
+        '    if (state.screenInboundReconnectBlockedPeers.has(call.peer)) { call.close(); return; }\n' + screen_previous,
+        1,
+    )
 
-# Tela recebida: se a stream caiu inesperadamente, rejeita tentativas de
-# recriação automática até o compartilhador realmente parar/iniciar de novo.
-text = text.replace(
-    '''  if (call.metadata?.kind === "screen") {
-    const sharer = state.members.find((member) => member.peerId === call.peer); if (!state.inVoice || !state.server.voiceChannel.exists || (sharer && !sharer.inVoice)) { call.close(); return; }''',
-    '''  if (call.metadata?.kind === "screen") {
-    const sharer = state.members.find((member) => member.peerId === call.peer); if (!state.inVoice || !state.server.voiceChannel.exists || (sharer && !sharer.inVoice) || state.screenInboundReconnectBlockedPeers.has(call.peer)) { call.close(); return; }''',
-    1,
-)
-
-text = text.replace(
-    '''    call.on("close", () => { if (state.screenCallsIn.get(call.peer) === call) { state.screenCallsIn.delete(call.peer); state.activeScreens.delete(call.peer); state.activeScreen = state.activeScreens.values().next().value || null; clearScreenStage(call.peer); renderMembers(); } }); call.on("error", () => { if (state.screenCallsIn.get(call.peer) === call) clearScreenStage(call.peer); }); return;''',
-    '''    const markScreenDropped = () => {
+old_screen_close = '''    call.on("close", () => { if (state.screenCallsIn.get(call.peer) === call) { state.screenCallsIn.delete(call.peer); state.activeScreens.delete(call.peer); state.activeScreen = state.activeScreens.values().next().value || null; clearScreenStage(call.peer); renderMembers(); } }); call.on("error", () => { if (state.screenCallsIn.get(call.peer) === call) clearScreenStage(call.peer); }); return;'''
+if old_screen_close in text:
+    text = text.replace(
+        old_screen_close,
+        '''    const markScreenDropped = () => {
       if (state.activeScreens.has(call.peer)) state.screenInboundReconnectBlockedPeers.add(call.peer);
       if (state.screenCallsIn.get(call.peer) === call) {
         state.screenCallsIn.delete(call.peer);
@@ -221,30 +216,22 @@ text = text.replace(
       }
     };
     call.on("close", markScreenDropped); call.on("error", markScreenDropped); return;''',
-    1,
-)
+        1,
+    )
 
-# Um screen-stopped real libera o próximo screen-started manual.
+# Um screen-stopped real libera o próximo compartilhamento manual.
 text = text.replace(
-    '''  if (message.type === "screen-stopped") { state.activeScreens.delete(peerId);''',
-    '''  if (message.type === "screen-stopped") { state.screenInboundReconnectBlockedPeers.delete(peerId); state.activeScreens.delete(peerId);''',
+    'if (message.type === "screen-stopped") { state.activeScreens.delete(peerId);',
+    'if (message.type === "screen-stopped") { state.screenInboundReconnectBlockedPeers.delete(peerId); state.activeScreens.delete(peerId);',
     1,
 )
 
-# Quando o roster confirma que uma transmissão realmente acabou, libera aquele
-# peer para um futuro compartilhamento manual.
-text = text.replace(
-    '''    state.activeScreen = state.activeScreens.values().next().value || null;
-    if (!state.inVoice && state.screenStream) stopScreenShare();''',
-    '''    state.activeScreen = state.activeScreens.values().next().value || null;
-    state.screenInboundReconnectBlockedPeers.forEach((peerId) => { if (!state.activeScreens.has(peerId)) state.screenInboundReconnectBlockedPeers.delete(peerId); });
-    if (!state.inVoice && state.screenStream) stopScreenShare();''',
-    1,
-)
 
-# Garante que nenhum reconnect explícito sobrou.
-if 'state.peer.reconnect()' in text:
-    raise SystemExit('v4.2.4: ainda existe state.peer.reconnect()')
+# Garantias finais da v4.2.4.
+if "state.peer.reconnect()" in text:
+    raise SystemExit("v4.2.4: ainda existe state.peer.reconnect()")
+if "connectToHost(true)" in text:
+    raise SystemExit("v4.2.4: ainda existe connectToHost(true)")
 
 path.write_text(text, encoding="utf-8")
-print("v4.2.4 aplicada: sem reconexão automática de host, PeerJS, voz ou tela")
+print("v4.2.4 aplicada: sem reconnect automático de host, PeerJS, voz ou tela")
