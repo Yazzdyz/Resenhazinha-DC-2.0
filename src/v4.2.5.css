@@ -1,0 +1,255 @@
+:root {
+  --resenhazinha-titlebar-height-v425: 32px;
+}
+
+.resenhazinha-titlebar-v425 {
+  position: fixed;
+  inset: 0 0 auto 0;
+  z-index: 2147483500;
+  height: var(--resenhazinha-titlebar-height-v425);
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid rgba(255,255,255,.035);
+  background: #050506;
+  color: #b5bac1;
+  font-family: inherit;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-app-region: drag;
+}
+
+.resenhazinha-titlebar-left-v425 {
+  height: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding-left: 10px;
+  padding-right: 150px;
+  color: #949ba4;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: .01em;
+  pointer-events: none;
+}
+
+.resenhazinha-titlebar-mark-v425 {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 5px;
+  background: #111214;
+  color: #dbdee1;
+  font-size: 9px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.resenhazinha-titlebar-brand-v425 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resenhazinha-titlebar-center-v425 {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  max-width: min(44vw, 560px);
+  height: 100%;
+  display: flex;
+  align-items: center;
+  transform: translateX(-50%);
+  overflow: hidden;
+  color: #b5bac1;
+  font-size: 11px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.resenhazinha-titlebar-controls-space-v425 {
+  width: 140px;
+  height: 100%;
+  margin-left: auto;
+  flex: 0 0 140px;
+  pointer-events: none;
+}
+
+body.has-custom-titlebar-v425 {
+  overflow: hidden !important;
+}
+
+body.has-custom-titlebar-v425 #app {
+  height: calc(100vh - var(--resenhazinha-titlebar-height-v425)) !important;
+  margin-top: var(--resenhazinha-titlebar-height-v425) !important;
+}
+
+html.has-discord-fullscreen-v422 .resenhazinha-titlebar-v425,
+body.has-discord-fullscreen-v422 .resenhazinha-titlebar-v425 {
+  display: none !important;
+}
+
+body.has-discord-fullscreen-v422.has-custom-titlebar-v425 #app {
+  height: 100vh !important;
+  margin-top: 0 !important;
+}
+
+body[data-theme="light"] .resenhazinha-titlebar-v425 {
+  border-bottom-color: rgba(0,0,0,.08);
+  background: #f2f3f5;
+  color: #4e5058;
+}
+
+body[data-theme="light"] .resenhazinha-titlebar-mark-v425 {
+  border-color: rgba(0,0,0,.12);
+  background: #e3e5e8;
+  color: #313338;
+}
+
+body[data-theme="light"] .resenhazinha-titlebar-center-v425 {
+  color: #4e5058;
+}
+
+/* Fullscreen: somente ícone, no mesmo espírito do Discord. */
+.screen-stream-card .screen-stream-bottom {
+  overflow: visible !important;
+}
+
+.screen-card-fullscreen-v42 {
+  position: relative !important;
+  width: 32px !important;
+  min-width: 32px !important;
+  max-width: 32px !important;
+  height: 32px !important;
+  min-height: 32px !important;
+  padding: 0 !important;
+  display: grid !important;
+  place-items: center !important;
+  gap: 0 !important;
+  border: 0 !important;
+  border-radius: 6px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: #b5bac1 !important;
+  overflow: visible !important;
+  transform: none !important;
+  font-size: 0 !important;
+}
+
+.screen-card-fullscreen-v42:hover {
+  background: rgba(255,255,255,.08) !important;
+  color: #f2f3f5 !important;
+  transform: none !important;
+}
+
+.screen-card-fullscreen-v42 span {
+  display: none !important;
+}
+
+.screen-card-fullscreen-v42 svg,
+.screen-fullscreen-exit-v422 svg {
+  width: 20px !important;
+  height: 20px !important;
+  fill: none !important;
+  stroke: currentColor !important;
+  stroke-width: 2.15 !important;
+  stroke-linecap: round !important;
+  stroke-linejoin: round !important;
+}
+
+.screen-stream-card.is-discord-fullscreen-v422 .screen-card-fullscreen-v42 {
+  width: 36px !important;
+  min-width: 36px !important;
+  max-width: 36px !important;
+  height: 36px !important;
+  min-height: 36px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 7px !important;
+  background: transparent !important;
+}
+
+.screen-stream-card.is-discord-fullscreen-v422 .screen-card-fullscreen-v42:hover {
+  background: rgba(255,255,255,.10) !important;
+}
+
+.screen-fullscreen-exit-v422 {
+  width: 36px !important;
+  height: 36px !important;
+  padding: 0 !important;
+  display: grid !important;
+  place-items: center !important;
+  border: 0 !important;
+  border-radius: 7px !important;
+  background: rgba(17,18,20,.56) !important;
+  color: #b5bac1 !important;
+  box-shadow: none !important;
+  overflow: visible !important;
+}
+
+.screen-fullscreen-exit-v422:hover {
+  background: rgba(43,45,49,.92) !important;
+  color: #f2f3f5 !important;
+}
+
+/* Tooltip próprio para não depender do tooltip nativo do Windows/Chromium. */
+.screen-card-fullscreen-v42[data-tooltip-v425]::after,
+.screen-fullscreen-exit-v422[data-tooltip-v425]::after {
+  content: attr(data-tooltip-v425);
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 9px);
+  z-index: 2147483600;
+  transform: translate(-50%, 4px);
+  padding: 6px 8px;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 5px;
+  background: #111214;
+  color: #dbdee1;
+  box-shadow: 0 6px 18px rgba(0,0,0,.34);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity .12s ease, transform .12s ease, visibility .12s ease;
+}
+
+.screen-card-fullscreen-v42[data-tooltip-v425]::before,
+.screen-fullscreen-exit-v422[data-tooltip-v425]::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 4px);
+  z-index: 2147483599;
+  width: 8px;
+  height: 8px;
+  transform: translateX(-50%) rotate(45deg);
+  border-right: 1px solid rgba(255,255,255,.08);
+  border-bottom: 1px solid rgba(255,255,255,.08);
+  background: #111214;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity .12s ease, visibility .12s ease;
+}
+
+.screen-card-fullscreen-v42[data-tooltip-v425]:hover::after,
+.screen-fullscreen-exit-v422[data-tooltip-v425]:hover::after {
+  transform: translate(-50%, 0);
+  opacity: 1;
+  visibility: visible;
+}
+
+.screen-card-fullscreen-v42[data-tooltip-v425]:hover::before,
+.screen-fullscreen-exit-v422[data-tooltip-v425]:hover::before {
+  opacity: 1;
+  visibility: visible;
+}
