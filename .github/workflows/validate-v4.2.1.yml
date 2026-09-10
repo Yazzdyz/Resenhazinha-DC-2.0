@@ -18,3 +18,14 @@ jobs:
       - name: Aplicar cadeia real e validar hotfix
         shell: pwsh
         run: .github/validate-v4.2.1.ps1
+
+      - name: Guardar fonte gerada para diagnóstico
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: diagnostico-mixer-v421
+          path: |
+            src/main.js
+            src/v4.2.0.js
+            index.html
+          if-no-files-found: error
