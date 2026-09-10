@@ -13,7 +13,7 @@ permissions:
   contents: write
 
 env:
-  APP_VERSION: "4.1.1"
+  APP_VERSION: "4.2.0"
 
 jobs:
   windows-release:
@@ -175,6 +175,15 @@ jobs:
           $content = $content.Replace('screenStart: null,', 'screenStart: "https://www.myinstants.com/media/sounds/discord-stream-start_7MsfgpB.mp3",')
           $content = $content.Replace('screenStop: null,', 'screenStop: "https://www.myinstants.com/media/sounds/discord-stream-stop.mp3",')
           Set-Content -Path $path -Value $content -NoNewline -Encoding utf8
+
+      - name: Aplicar melhorias v4.2.0
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          python ".github/apply-v4.2.0.py"
+          git diff --check
+          node --check src/main.js
+          node --check src/v4.2.0.js
 
       - name: Preparar Node.js
         uses: actions/setup-node@v4
