@@ -87,6 +87,7 @@ function replaceEmojiPicker() {
   form.dataset.emojiV422 = "ready";
 
   document.querySelector("#emoji-picker-v42")?.remove();
+  document.querySelector("#emoji-picker-v422")?.remove();
 
   let oldButton = document.querySelector("#chat-emoji-button-v42");
   if (!oldButton) {
