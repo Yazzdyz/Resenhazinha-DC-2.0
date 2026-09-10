@@ -13,7 +13,7 @@ permissions:
   contents: write
 
 env:
-  APP_VERSION: "4.2.6"
+  APP_VERSION: "4.2.7"
 
 jobs:
   windows-release:
@@ -275,6 +275,17 @@ jobs:
           if ($main -notmatch 'resenhazinha:window-action') { throw "IPC dos controles da janela não foi aplicado." }
           if ($preload -notmatch 'windowAction') { throw "Bridge dos controles da janela não foi aplicada." }
           if ($index -notmatch '/src/v4.2.6.js') { throw "Módulo v4.2.6 não foi injetado." }
+
+      - name: Corrigir inicialização da janela v4.2.7
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          python ".github/apply-v4.2.7.py"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git diff --check
+          node --check electron/main.cjs
+          $main = Get-Content "electron/main.cjs" -Raw
+          if ($main -match 'mainWindow\.on\("maximize", sendWindowState\);') { throw "Listener prematuro ainda existe." }
 
       - name: Preparar Node.js
         uses: actions/setup-node@v4
