@@ -35,18 +35,20 @@ jobs:
           elif new not in text:
               raise SystemExit('Não encontrei APP_VERSION 4.2.1 no workflow')
 
-          step = '''      - name: Aplicar fullscreen e emojis v4.2.2
-            shell: pwsh
-            run: |
-              $ErrorActionPreference = "Stop"
-              python ".github/apply-v4.2.2.py"
-              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-              git diff --check
-              node --check src/v4.2.2.js
-              $index = Get-Content "index.html" -Raw
-              if ($index -notmatch '/src/v4.2.2.js') { throw "Módulo v4.2.2 não foi injetado." }
-
-'''
+          step_lines = [
+              '      - name: Aplicar fullscreen e emojis v4.2.2',
+              '        shell: pwsh',
+              '        run: |',
+              '          $ErrorActionPreference = "Stop"',
+              '          python ".github/apply-v4.2.2.py"',
+              '          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }',
+              '          git diff --check',
+              '          node --check src/v4.2.2.js',
+              '          $index = Get-Content "index.html" -Raw',
+              '          if ($index -notmatch "/src/v4.2.2.js") { throw "Módulo v4.2.2 não foi injetado." }',
+              '',
+          ]
+          step = '\n'.join(step_lines) + '\n'
           anchor = '      - name: Preparar Node.js\n'
           if 'Aplicar fullscreen e emojis v4.2.2' not in text:
               if anchor not in text:
