@@ -100,7 +100,12 @@ node --check src/v4.2.0.js
 if ((Get-Content "src/v4.2.0.js" -Raw) -notmatch 'CLEAN_BOOST_MAX = 200') {
   throw "O mixer visual não ficou em 200%."
 }
+if ((Get-Content "index.html" -Raw) -notmatch '/src/v4\.2\.0\.js') {
+  throw "O módulo da v4.2.0 não foi carregado."
+}
 $finalMain = Get-Content "src/main.js" -Raw
 if ($finalMain -notmatch 'createPlaybackLimiter') { throw "Limiter não foi aplicado." }
-if ($finalMain -notmatch 'connect\(gain\)\.connect\(limiter\)\.connect\(destination\)') { throw "Cadeia protegida não foi aplicada." }
-Write-Host "Hotfix v4.2.1 validada: 200% preservado e limiter ativo."
+if ($finalMain -notmatch 'connect\(gain\)\.connect\(limiter\)\.connect\(context\.destination\)') { throw "A rota única de áudio não foi aplicada." }
+if ($finalMain -notmatch 'audio\.volume = 0;') { throw "A reprodução paralela antiga ainda está ativa." }
+if ($finalMain -notmatch 'não força saída da call') { throw "O timer de saída automática da call ainda está ativo." }
+Write-Host "Hotfix v4.2.1 validada: 200% preservado, uma única rota de áudio e limiter ativo."
