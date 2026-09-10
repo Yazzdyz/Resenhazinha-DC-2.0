@@ -13,7 +13,7 @@ permissions:
   contents: write
 
 env:
-  APP_VERSION: "4.2.0"
+  APP_VERSION: "4.2.1"
 
 jobs:
   windows-release:
@@ -181,9 +181,25 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           python ".github/apply-v4.2.0.py"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           git diff --check
           node --check src/main.js
           node --check src/v4.2.0.js
+
+      - name: Corrigir mixer 200% v4.2.1
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          python ".github/apply-v4.2.1.py"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git diff --check
+          node --check src/main.js
+          node --check src/v4.2.0.js
+          $main = Get-Content "src/main.js" -Raw
+          $v42 = Get-Content "src/v4.2.0.js" -Raw
+          if ($v42 -notmatch 'CLEAN_BOOST_MAX = 200') { throw "Mixer não ficou em 200%." }
+          if ($main -notmatch 'createPlaybackLimiter') { throw "Limiter do mixer não foi aplicado." }
+          if ($main -notmatch 'connect\(gain\)\.connect\(limiter\)\.connect\(context\.destination\)') { throw "Rota única do mixer não foi aplicada." }
 
       - name: Preparar Node.js
         uses: actions/setup-node@v4
