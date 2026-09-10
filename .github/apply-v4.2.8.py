@@ -1,63 +1,65 @@
 from pathlib import Path
+import re
 
 path = Path("src/main.js")
 text = path.read_text(encoding="utf-8")
 
-old = '''function acceptGuestConnection(connection) {
-  connection.on("data", (message) => handleGuestMessage(connection.peer, message));
-  connection.on("close", () => removeGuest(connection.peer)); connection.on("error", () => removeGuest(connection.peer));
-'''
-
-new = '''function guestHasLiveMedia(peerId) {
-  const member = state.hostMembers.get(peerId);
+replacement = '''function guestHasLiveMedia(peerId) {
   return Boolean(
-    member?.inVoice
-    || state.voiceCalls.has(peerId)
+    state.voiceCalls.has(peerId)
     || state.screenCallsOut.has(peerId)
     || state.screenCallsIn.has(peerId)
     || state.activeScreens.has(peerId)
   );
 }
 
-function handleGuestControlDisconnect(connection) {
-  const peerId = connection.peer;
-  const trackedConnection = state.guestConnections.get(peerId);
 
-  // Um evento atrasado de uma conexão antiga nunca pode derrubar a sessão atual.
-  if (trackedConnection && trackedConnection !== connection) return;
-
-  if (trackedConnection === connection) state.guestConnections.delete(peerId);
+function removeGuest(peerId) {
+  state.pendingGuestProfiles.delete(peerId);
+  const member = state.hostMembers.get(peerId);
   if (!state.hostMembers.has(peerId)) return;
 
-  // A conexão de controle (chat/roster) é separada da mídia WebRTC.
-  // Se voz/tela ainda estão vivas, preserva tudo e não chama closeCallsForPeer().
+  // O canal de controle PeerJS e a mídia WebRTC são conexões diferentes.
+  // Nunca fecha voz/tela que continuam vivas só porque o controle deu erro/close.
   if (guestHasLiveMedia(peerId)) {
-    console.warn("[Resenhazinha] Canal de controle caiu; mantendo voz/tela ativa.", peerId);
+    const connection = state.guestConnections.get(peerId);
+    if (connection && !connection.open) state.guestConnections.delete(peerId);
+
+    console.warn("[Resenhazinha] Controle do convidado caiu; mídia continua ativa.", peerId);
+
+    // Se a pessoa realmente fechou o app, a mídia também vai cair.
+    // Só então limpamos o membro; não existe reconnect automático aqui.
+    window.setTimeout(() => {
+      if (!state.hostMembers.has(peerId)) return;
+      if (state.guestConnections.get(peerId)?.open) return;
+      if (guestHasLiveMedia(peerId)) return;
+      removeGuest(peerId);
+    }, 15000);
     return;
   }
 
-  removeGuest(peerId);
-}
+  if (member) rememberMember(member);
+  state.guestConnections.delete(peerId);
+  state.hostMembers.delete(peerId);
+  state.members = Array.from(state.hostMembers.values());
+  closeCallsForPeer(peerId);
+  state.activeScreens.delete(peerId);
+  state.activeScreen = state.activeScreens.values().next().value || null;
+  clearScreenStage(peerId);
+  broadcastRoster(false);
+  scheduleServerPersistence();
+  if (member) toast(`${member.name} ficou offline.`);
+}'''
 
-function acceptGuestConnection(connection) {
-  connection.on("data", (message) => handleGuestMessage(connection.peer, message));
-  connection.on("close", () => handleGuestControlDisconnect(connection));
-  connection.on("error", (error) => {
-    // Erro de DataConnection não significa que a mídia caiu.
-    // O evento close decide o destino do canal de controle sem tocar na call ativa.
-    console.warn("[Resenhazinha] Erro no canal de controle do convidado.", connection.peer, error?.type || error?.message || error);
-  });
-'''
+pattern = re.compile(r"function removeGuest\(peerId\) \{.*?\n\}", re.DOTALL)
+text, count = pattern.subn(replacement, text, count=1)
+if count != 1:
+    raise SystemExit(f"v4.2.8: não encontrei removeGuest (count={count})")
 
-if old not in text:
-    raise SystemExit("v4.2.8: não encontrei acceptGuestConnection esperado")
-
-text = text.replace(old, new, 1)
-
-if 'connection.on("close", () => removeGuest(connection.peer))' in text:
-    raise SystemExit("v4.2.8: remoção direta no close ainda existe")
-if 'connection.on("error", () => removeGuest(connection.peer))' in text:
-    raise SystemExit("v4.2.8: remoção direta no error ainda existe")
+if "function guestHasLiveMedia(peerId)" not in text:
+    raise SystemExit("v4.2.8: proteção de mídia não foi aplicada")
+if "if (guestHasLiveMedia(peerId))" not in text:
+    raise SystemExit("v4.2.8: removeGuest ainda não protege mídia ativa")
 
 path.write_text(text, encoding="utf-8")
-print("v4.2.8 aplicada: queda do canal de controle não encerra voz/tela ativa")
+print("v4.2.8 aplicada: queda do controle não encerra mídia WebRTC ativa")
