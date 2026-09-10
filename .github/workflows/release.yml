@@ -13,7 +13,7 @@ permissions:
   contents: write
 
 env:
-  APP_VERSION: "4.2.4"
+  APP_VERSION: "4.2.5"
 
 jobs:
   windows-release:
@@ -241,6 +241,21 @@ jobs:
           if ($main -match 'connectToHost\(true\)') { throw "Ainda existe reconnect automático com o host." }
           if ($main -notmatch 'voiceReconnectBlockedPeers') { throw "Bloqueio de reconexão de voz não foi aplicado." }
           if ($main -notmatch 'screenReconnectBlockedPeers') { throw "Bloqueio de reconexão de tela não foi aplicado." }
+
+      - name: Aplicar polimento visual v4.2.5
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          python ".github/apply-v4.2.5.py"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git diff --check
+          node --check electron/main.cjs
+          node --check src/v4.2.5.js
+          $main = Get-Content "electron/main.cjs" -Raw
+          $index = Get-Content "index.html" -Raw
+          if ($main -notmatch 'titleBarStyle: "hidden"') { throw "Titlebar integrada não foi aplicada." }
+          if ($main -notmatch 'titleBarOverlay:') { throw "Overlay dos controles da janela não foi aplicado." }
+          if ($index -notmatch '/src/v4.2.5.js') { throw "Módulo visual v4.2.5 não foi injetado." }
 
       - name: Preparar Node.js
         uses: actions/setup-node@v4
