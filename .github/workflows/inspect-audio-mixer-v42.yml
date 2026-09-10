@@ -1,0 +1,34 @@
+name: Inspecionar mixer de áudio v4.2
+
+on:
+  push:
+    branches:
+      - inspect/audio-mixer-v42
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixar código
+        uses: actions/checkout@v4
+
+      - name: Decodificar mixer v3.1.0
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import base64, gzip
+          src = Path('.github/apply-voice-mixer-v3.1.0.py.gz.b64').read_text().strip()
+          data = gzip.decompress(base64.b64decode(src))
+          Path('decoded-mixer.py').write_bytes(data)
+          print(Path('decoded-mixer.py').read_text())
+          PY
+
+      - name: Guardar mixer decodificado
+        uses: actions/upload-artifact@v4
+        with:
+          name: decoded-audio-mixer
+          path: decoded-mixer.py
