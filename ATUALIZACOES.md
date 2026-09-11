@@ -1,5 +1,15 @@
 # Atualizações do Resenhazinha
 
+## 4.4.3
+
+- Simplifica a aceitação de chamadas WebRTC para o comportamento estável das versões antigas.
+- Voz e tela não são mais bloqueadas por diferença de sessionId antes do primeiro stream remoto existir.
+- A tela pode chegar antes do evento "AO VIVO" sem ser encerrada pelo reconciliador.
+- A janela de negociação aumenta para 30 segundos.
+- Mantém Cloudflare como servidor central e PeerJS apenas como transporte/sinalização da mídia.
+- Adiciona diagnóstico de estados ICE/WebRTC para identificar falhas de rota se ainda houver problema.
+
+
 ## 4.4.2
 
 - Restaura apenas a reconexão da sinalização PeerJS, sem sair da call e sem fechar streams.
