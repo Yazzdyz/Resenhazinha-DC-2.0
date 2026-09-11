@@ -5171,9 +5171,35 @@ function scheduleCameraReconnect(peerId) {
   });
 }
 
+function refreshMemberPeerForCall(call) {
+  const member = memberForCloudIdentity(call?.peer, call?.metadata?.clientId);
+  if (!member) return null;
+
+  const mediaClientId = sanitizeClientId(call?.metadata?.clientId);
+  if (mediaClientId && mediaClientId === member.clientId && member.peerId !== call.peer) {
+    const oldPeerId = member.peerId;
+    member.peerId = call.peer;
+
+    if (oldPeerId) {
+      closeCallsForPeer(oldPeerId);
+      const screen = state.activeScreens.get(oldPeerId);
+      if (screen) {
+        state.activeScreens.delete(oldPeerId);
+        state.activeScreens.set(call.peer, { ...screen, peerId: call.peer });
+      }
+      clearScreenStage(oldPeerId);
+    }
+
+    state.members = dedupeMembersByIdentity(state.members);
+    renderMembers();
+  }
+
+  return member;
+}
+
 function handleIncomingCall(call) {
   if (String(call.metadata?.kind || "").startsWith("camera")) {
-    const member = memberForCloudIdentity(call.peer, call.metadata?.clientId);
+    const member = refreshMemberPeerForCall(call);
     const remoteSessionId = normalizeMediaSessionId(call.metadata?.voiceSessionId);
     const remoteCameraSessionId = normalizeMediaSessionId(call.metadata?.cameraSessionId);
     const expectedRemoteSessionId = normalizeMediaSessionId(member?.voiceSessionId);
@@ -5193,7 +5219,7 @@ function handleIncomingCall(call) {
     call.on("close", ended); call.on("error", ended); return;
   }
   if (String(call.metadata?.kind || "").startsWith("screen")) {
-    const sharer = memberForCloudIdentity(call.peer, call.metadata?.clientId);
+    const sharer = refreshMemberPeerForCall(call);
     const remoteSessionId = normalizeMediaSessionId(call.metadata?.screenSessionId);
     const announcedSessionId = normalizeMediaSessionId(state.activeScreens.get(call.peer)?.screenSessionId);
     const invalidSession = Boolean(remoteSessionId && announcedSessionId && remoteSessionId !== announcedSessionId);
@@ -5222,13 +5248,7 @@ function handleIncomingCall(call) {
     call.on("error", () => handleIncomingScreenDropped(call));
     return;
   }
-  const caller = memberForCloudIdentity(call.peer, call.metadata?.clientId);
-  if (caller && caller.peerId !== call.peer && sanitizeClientId(call.metadata?.clientId) === caller.clientId) {
-    const oldPeerId = caller.peerId;
-    caller.peerId = call.peer;
-    closeCallsForPeer(oldPeerId);
-    state.activeScreens.delete(oldPeerId);
-  }
+  const caller = refreshMemberPeerForCall(call);
   const remoteSessionId = normalizeMediaSessionId(call.metadata?.voiceSessionId);
   const remoteRevision = normalizeVoicePresenceRevision(call.metadata?.voicePresenceRevision);
   const callerRevision = normalizeVoicePresenceRevision(caller?.voicePresenceRevision);
@@ -5292,8 +5312,8 @@ function registerVoiceCall(call, detail = {}) {
 function handleVoiceCallDropped(call) {
   if (!callSessions.release("voice", call.peer, call)) return;
   removeRemoteAudio(call.peer, call);
-  const member = state.members.find((item) => item.peerId === call.peer);
-  if (state.inVoice && member?.inVoice) scheduleVoiceReconnect(call.peer);
+  const member = memberForCloudIdentity(call.peer, call.metadata?.clientId);
+  if (state.inVoice && member?.inVoice) scheduleVoiceReconnect(member.peerId || call.peer);
 }
 
 function scheduleVoiceReconnect(peerId) {
