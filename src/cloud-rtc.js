@@ -113,6 +113,7 @@ export class CloudRtcManager {
       remoteDescriptionSet: false,
       closed: false,
       disconnectTimer: null,
+      negotiationTimer: null,
       createdAt: Date.now(),
       screenSessionId: cleanId(remote?.screenSessionId),
       voiceSessionId: cleanId(remote?.voiceSessionId),
@@ -134,7 +135,9 @@ export class CloudRtcManager {
       this._emitState(entry);
       if (pc.connectionState === "connected") {
         clearTimeout(entry.disconnectTimer);
+        clearTimeout(entry.negotiationTimer);
         entry.disconnectTimer = null;
+        entry.negotiationTimer = null;
         return;
       }
 
@@ -221,6 +224,12 @@ export class CloudRtcManager {
         voiceSessionId: cleanId(remote?.localVoiceSessionId),
         screenSessionId: cleanId(remote?.screenSessionId),
       });
+      clearTimeout(entry.negotiationTimer);
+      entry.negotiationTimer = setTimeout(() => {
+        if (entry.closed || entry.pc.connectionState === "connected") return;
+        this.close(kind, clientId, { notify: false, reason: "negotiation-timeout" });
+        this.onNeedsReconcile?.(kind, clientId);
+      }, 15_000);
       this._emitState(entry, { phase: "offer-sent" });
       return entry;
     } catch (error) {
@@ -288,6 +297,8 @@ export class CloudRtcManager {
         await entry.pc.setRemoteDescription(description);
         entry.remoteDescriptionSet = true;
         await this._flushCandidates(entry);
+        clearTimeout(entry.negotiationTimer);
+        entry.negotiationTimer = null;
         this._emitState(entry, { phase: "answer-applied" });
       } catch (error) {
         console.error("[CloudRTC] Falha ao aplicar answer.", kind, clientId, error);
@@ -341,7 +352,9 @@ export class CloudRtcManager {
     this.entries.delete(key);
     entry.closed = true;
     clearTimeout(entry.disconnectTimer);
+    clearTimeout(entry.negotiationTimer);
     entry.disconnectTimer = null;
+    entry.negotiationTimer = null;
 
     if (notify) {
       try {
