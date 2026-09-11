@@ -1900,6 +1900,25 @@ function applyPendingProfileMediaToMembers() {
   }
 }
 
+async function preloadCachedMemberProfiles() {
+  try {
+    const profiles = await window.resenhazinhaDesktop?.loadMemberProfiles?.();
+    for (const profile of profiles || []) {
+      const clientId = sanitizeClientId(profile?.clientId);
+      if (!clientId) continue;
+      const avatar = sanitizeAvatar(profile?.avatar);
+      const banner = sanitizeProfileBanner(profile?.banner);
+      if (avatar) rememberPendingProfileMedia(clientId, "avatar", avatar);
+      if (banner) rememberPendingProfileMedia(clientId, "banner", banner);
+    }
+    applyPendingProfileMediaToMembers();
+    renderMembers();
+    renderChatHistory();
+  } catch (_error) {
+    // Cache visual é auxiliar; falha nele nunca impede entrar no servidor.
+  }
+}
+
 function scheduleOwnProfileResync(delay = 180) {
   window.clearTimeout(state.profileResyncTimer);
   state.profileResyncTimer = window.setTimeout(() => {
@@ -4980,6 +4999,7 @@ function memberFrom(peerId, name, muted = false, avatar = null, clientId = "", b
 
 function openRoomView() {
   state.roomEntered = true; setLobbyBusy(false); elements.lobbyView.hidden = true; elements.roomView.hidden = false; elements.roomCodeDisplay.textContent = currentInviteCode(); elements.selfName.textContent = state.nickname; state.inVoice = false; state.voiceJoinedAt = null; startConnectionHealthMonitor(); renderLocalAvatars(); setConnectionState("Conectado", "ok"); applyLocalAudioState(); ensureValidView(); renderServerUI(); updateControlState(); renderMembers(); renderVoiceGrid();
+  void preloadCachedMemberProfiles();
 }
 
 
