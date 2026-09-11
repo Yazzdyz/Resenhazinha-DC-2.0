@@ -912,6 +912,50 @@ app.whenReady().then(() => {
     return { stopped: true };
   });
 
+  ipcMain.handle("resenhazinha:search-gifs", async (_event, rawQuery) => {
+    const query = String(rawQuery || "").replace(/\s+/g, " ").trim().slice(0, 60);
+    const term = query || "reaction";
+    const slug = encodeURIComponent(term.toLocaleLowerCase("pt-BR").replace(/\s+/g, "-"));
+    const url = `https://tenor.com/search/${slug}-gifs`;
+
+    try {
+      const response = await fetch(url, {
+        headers: {
+          "accept": "text/html,application/xhtml+xml",
+          "accept-language": "pt-BR,pt;q=0.9,en;q=0.7",
+          "user-agent": "Mozilla/5.0 Resenhazinha/5.1",
+        },
+        redirect: "follow",
+      });
+      if (!response.ok) return { ok: false, reason: "provider-unavailable", results: [] };
+      let html = await response.text();
+      html = html
+        .replaceAll("\\u002F", "/")
+        .replaceAll("\\u0026", "&")
+        .replaceAll("\\/", "/")
+        .replaceAll("&amp;", "&");
+
+      const matches = html.match(/https:\/\/media\.tenor\.com\/[^"'<>\\\s]+?\.(?:gif|webp)(?:\?[^"'<>\\\s]*)?/gi) || [];
+      const seen = new Set();
+      const results = [];
+      for (const rawUrl of matches) {
+        let mediaUrl = String(rawUrl).replace(/[),.;]+$/, "");
+        if (!/^https:\/\/media\.tenor\.com\//i.test(mediaUrl) || seen.has(mediaUrl)) continue;
+        seen.add(mediaUrl);
+        results.push({
+          id: crypto.createHash("sha1").update(mediaUrl).digest("hex").slice(0, 16),
+          url: mediaUrl,
+          previewUrl: mediaUrl,
+          title: query || "GIF em destaque",
+        });
+        if (results.length >= 36) break;
+      }
+      return { ok: results.length > 0, provider: "Tenor", query, results };
+    } catch (_error) {
+      return { ok: false, reason: "provider-unavailable", results: [] };
+    }
+  });
+
   ipcMain.on("resenhazinha:voice-active", (_event, active) => {
     setVoicePowerSave(Boolean(active));
   });
