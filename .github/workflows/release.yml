@@ -16,7 +16,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  APP_VERSION: "4.5.2"
+  APP_VERSION: "5.0.0"
 
 jobs:
   windows-release:
@@ -67,7 +67,7 @@ jobs:
           $tag = "v$env:APP_VERSION"
           gh release view $tag --repo "${{ github.repository }}" *> $null
           if ($LASTEXITCODE -ne 0) {
-            gh release create $tag --repo "${{ github.repository }}" --target $env:GITHUB_SHA --title "Resenhazinha $tag" --notes "Estabiliza a ordem visual da call: transmissor no topo e sem timers individuais por usuário."
+            gh release create $tag --repo "${{ github.repository }}" --target $env:GITHUB_SHA --title "Resenhazinha $tag" --notes "v5.0.0: entrada direta na call, áudio dinâmico para apps abertos durante a transmissão, maior qualidade/bitrate de compartilhamento e melhorias visuais da call."
           }
           gh release upload $tag `
             "release/Resenhazinha-Setup-$env:APP_VERSION.exe" `
