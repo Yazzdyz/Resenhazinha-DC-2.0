@@ -207,7 +207,10 @@ const cloudRtc = new CloudRtcManager({
       data,
     });
   },
-  getVoiceStream: () => state.localStream,
+  // Para a call usamos a captura nativa do microfone diretamente.
+  // O stream processado continua disponível para medidor/UI, mas não fica no
+  // caminho crítico do WebRTC.
+  getVoiceStream: () => state.rawMicrophoneStream || state.localStream,
   getScreenStream: () => state.screenStream,
   onVoiceStream: (entry, stream) => {
     const member = state.members.find((item) => item.clientId === entry.clientId);
@@ -4776,7 +4779,16 @@ function renderVoiceGrid() {
   renderVoiceConnectionPanel();
   applySpeakingStateToDom();
 }
-function applyLocalAudioState() { const enabled = state.inVoice && !state.muted && !state.serverMuted; state.localStream?.getAudioTracks().forEach((track) => { track.enabled = enabled; }); }
+function applyLocalAudioState() {
+  const enabled = state.inVoice && !state.muted && !state.serverMuted;
+  const tracks = new Set([
+    ...(state.localStream?.getAudioTracks?.() || []),
+    ...(state.rawMicrophoneStream?.getAudioTracks?.() || []),
+  ]);
+  tracks.forEach((track) => {
+    track.enabled = enabled;
+  });
+}
 
 function microphoneAudioConstraints(deviceId = state.microphoneDeviceId, level = state.noiseSuppressionLevel) {
   const normalizedLevel = normalizeNoiseSuppressionLevel(level);
@@ -5643,7 +5655,10 @@ function updateMemberPlaybackGain(peerId) {
   const node = state.memberAudioNodes.get(peerId);
   if (node?.gain) node.gain.gain.value = effective;
   const audio = document.getElementById(`audio-${safeId(peerId)}`);
-  if (audio && !node?.gain) audio.volume = Math.min(1, effective);
+  if (audio && !node?.gain) {
+    audio.volume = Math.min(1, effective);
+    audio.muted = Boolean(state.deafened) || effective <= 0.0001;
+  }
 }
 
 function disposeMemberAudioNode(peerId) {
@@ -5705,46 +5720,72 @@ async function attachRemoteAudio(peerId, stream, ownerCall) {
 
 async function attachCloudRemoteAudio(peerId, stream) {
   const id = String(peerId || "");
-  if (!id || !stream) return;
+  const track = stream?.getAudioTracks?.()[0];
+  if (!id || !stream || !track) {
+    console.warn("[Resenhazinha Voz] Stream remoto chegou sem track de áudio.", {
+      peerId: id,
+      tracks: stream?.getTracks?.().map((item) => ({
+        kind: item.kind,
+        readyState: item.readyState,
+        enabled: item.enabled,
+        muted: item.muted,
+      })) || [],
+    });
+    return;
+  }
 
   removeRemoteAudio(id);
 
   const audio = document.createElement("audio");
   audio.id = `audio-${safeId(id)}`;
   audio.autoplay = true;
+  audio.playsInline = true;
+  audio.preload = "auto";
   audio.dataset.voicePeerId = id;
-  audio.muted = state.deafened;
+  audio.muted = Boolean(state.deafened);
+  audio.srcObject = stream;
+  audio.volume = Math.min(1, getMemberVolume(id) * normalizeOutputVolume(state.outputVolume));
   elements.audioContainer.append(audio);
 
-  try {
-    const context = await ensurePlaybackAudioContext();
-    if (context) {
-      const source = context.createMediaStreamSource(stream);
-      const gain = context.createGain();
-      const destination = context.createMediaStreamDestination();
-      source.connect(gain).connect(destination);
-      audio.srcObject = destination.stream;
-      state.memberAudioNodes.set(id, {
-        source,
-        gain,
-        destination,
-        audio,
-        stream,
-        ownerCall: null,
-        cloudRtc: true,
-      });
-    } else {
-      audio.srcObject = stream;
-    }
+  // Nesta versão a voz remota toca direto no elemento <audio>. Isso remove
+  // AudioContext/GainNode/MediaStreamDestination do caminho crítico.
+  state.memberAudioNodes.set(id, {
+    audio,
+    stream,
+    ownerCall: null,
+    cloudRtc: true,
+    directPlayback: true,
+  });
 
-    updateMemberPlaybackGain(id);
-    await applyOutputDevice(audio);
-    await audio.play().catch(() => undefined);
-  } catch (_error) {
-    audio.srcObject = stream;
-    audio.volume = Math.min(1, getMemberVolume(id) * state.outputVolume);
-    audio.play().catch(() => undefined);
-  }
+  await applyOutputDevice(audio);
+
+  const tryPlay = () => {
+    if (!audio.isConnected || audio.srcObject !== stream || state.deafened) return;
+    audio.muted = false;
+    audio.volume = Math.min(1, getMemberVolume(id) * normalizeOutputVolume(state.outputVolume));
+    const playback = audio.play();
+    playback?.catch?.((error) => {
+      console.warn("[Resenhazinha Voz] Reprodução remota aguardando interação.", id, error?.name || error);
+    });
+  };
+
+  track.addEventListener("unmute", tryPlay);
+  stream.addEventListener?.("addtrack", tryPlay);
+  document.addEventListener("pointerdown", tryPlay, { once: true, capture: true });
+  document.addEventListener("keydown", tryPlay, { once: true, capture: true });
+
+  tryPlay();
+  window.setTimeout(tryPlay, 120);
+  window.setTimeout(tryPlay, 600);
+  window.setTimeout(tryPlay, 1600);
+
+  console.info("[Resenhazinha Voz] Track remota anexada.", {
+    peerId: id,
+    readyState: track.readyState,
+    enabled: track.enabled,
+    muted: track.muted,
+    label: track.label,
+  });
 
   startSpeakingDetector(id, stream);
 }
