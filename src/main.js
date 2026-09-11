@@ -1,6 +1,12 @@
 import Peer from "peerjs";
 import "./styles.css";
 import {
+  CloudConnection,
+  buildCloudSocketUrl,
+  createCloudOwnerKey,
+  sanitizeCloudOwnerKey,
+} from "./cloud-control.js";
+import {
   CALL_PROTOCOL_VERSION,
   CallSessionManager,
   dedupeMembersByIdentity,
@@ -66,6 +72,9 @@ const callSessions = new CallSessionManager();
 const state = {
   peer: null,
   hostConnection: null,
+  cloudMode: true,
+  cloudReady: false,
+  cloudOwnerKey: "",
   guestConnections: new Map(),
   pendingGuestProfiles: new Map(),
   hostMembers: new Map(),
@@ -855,11 +864,14 @@ function loadServerBinding() {
     const raw = JSON.parse(localStorage.getItem(SERVER_BINDING_KEY) || "null");
     const roomCode = normalizeRoomCode(raw?.roomCode || "");
     if (roomCode.length < 4) return null;
+    const isOwner = Boolean(raw?.isOwner);
     return {
       roomCode,
       inviteToken: normalizeInviteToken(raw?.inviteToken || ""),
-      isOwner: Boolean(raw?.isOwner),
+      isOwner,
       serverName: cleanServerName(raw?.serverName || "Resenhazinha"),
+      ownerKey: isOwner ? sanitizeCloudOwnerKey(raw?.ownerKey || "") : "",
+      cloudMigrated: isOwner ? Boolean(raw?.cloudMigrated) : false,
     };
   } catch (_error) {
     return null;
@@ -869,11 +881,14 @@ function loadServerBinding() {
 function saveServerBinding(binding) {
   const roomCode = normalizeRoomCode(binding?.roomCode || "");
   if (roomCode.length < 4) return;
+  const isOwner = Boolean(binding?.isOwner);
   state.serverBinding = {
     roomCode,
     inviteToken: normalizeInviteToken(binding?.inviteToken || state.server?.inviteToken || ""),
-    isOwner: Boolean(binding?.isOwner),
+    isOwner,
     serverName: cleanServerName(binding?.serverName || state.server?.name || "Resenhazinha"),
+    ownerKey: isOwner ? sanitizeCloudOwnerKey(binding?.ownerKey || state.cloudOwnerKey || state.serverBinding?.ownerKey || "") : "",
+    cloudMigrated: isOwner ? Boolean(binding?.cloudMigrated ?? state.serverBinding?.cloudMigrated) : false,
   };
   localStorage.setItem(SERVER_BINDING_KEY, JSON.stringify(state.serverBinding));
   applySavedServerLobby();
@@ -883,6 +898,12 @@ function clearServerBinding() {
   state.serverBinding = null;
   localStorage.removeItem(SERVER_BINDING_KEY);
   applySavedServerLobby();
+}
+
+function getOrCreateCloudOwnerKey() {
+  const existing = sanitizeCloudOwnerKey(state.serverBinding?.ownerKey || state.cloudOwnerKey || "");
+  if (existing) return existing;
+  return createCloudOwnerKey();
 }
 
 function applySavedServerLobby() {
@@ -1170,9 +1191,12 @@ function scheduleServerPersistence() {
   state.persistenceTimer = window.setTimeout(() => persistServerStateNow(), 180);
 }
 
-function scheduleHostReconnect() {
+function scheduleHostReconnect(delayMs = 1400) {
+  if (!state.cloudMode || !state.roomCode || state.peer?.destroyed) return;
   window.clearTimeout(state.reconnectTimer);
-  state.reconnectTimer = null;
+  state.reconnectTimer = window.setTimeout(() => {
+    if (!state.hostConnection?.open && state.peer?.open) connectToHost(true);
+  }, Math.max(250, Number(delayMs) || 1400));
 }
 
 function normalizeVoicePresenceRevision(value) {
@@ -1243,7 +1267,6 @@ function applyGuestVoiceStatus(peerId, message) {
 function startConnectionHeartbeat() {
   window.clearInterval(state.heartbeatTimer);
   state.heartbeatTimer = null;
-  if (state.isHost) return;
   state.heartbeatTimer = window.setInterval(() => {
     const connection = state.hostConnection;
     if (!connection?.open) return;
@@ -1689,7 +1712,7 @@ async function finishProfileMediaTransfer(sourcePeerId, message) {
   if (!safe) return;
   const member = applyProfileMediaToMember(transfer.clientId, transfer.kind, safe);
   if (!member) return;
-  if (state.isHost) {
+  if (state.isHost && !state.cloudMode) {
     void Promise.resolve(window.resenhazinhaDesktop?.cacheMemberProfile?.({ clientId: transfer.clientId, [transfer.kind]: safe, bio: member.bio })).catch(() => undefined);
     state.guestConnections.forEach((connection, peerId) => { if (connection.open && peerId !== sourcePeerId) void sendProfileMedia(connection, transfer.clientId, transfer.kind, safe); });
     broadcastRoster(false);
@@ -1704,7 +1727,7 @@ function clearProfileMedia(sourcePeerId, message) {
   const member = memberByClientId(clientId);
   if (!member) return;
   member[kind] = null;
-  if (state.isHost) {
+  if (state.isHost && !state.cloudMode) {
     rememberMember(member);
     void Promise.resolve(window.resenhazinhaDesktop?.cacheMemberProfile?.({ clientId, [kind]: null, bio: member.bio })).catch(() => undefined);
     state.guestConnections.forEach((connection, peerId) => { if (connection.open && peerId !== sourcePeerId) connection.send({ type: "profile-media-clear", clientId, kind }); });
@@ -1734,32 +1757,35 @@ function sendAllProfileMediaToGuest(connection) {
 
 function publishProfile() {
   if (!state.peer?.open) return;
-  if (state.isHost) {
-    const member = state.hostMembers.get(state.peer.id);
-    if (member) {
-      member.avatar = state.avatarData;
-      member.banner = state.bannerData;
-      member.bio = cleanBio(state.profileBio);
-      member.presence = normalizePresence(state.presenceStatus);
-      member.name = state.nickname || member.name;
-      rememberMember(member);
-      void Promise.resolve(window.resenhazinhaDesktop?.cacheMemberProfile?.({ clientId: state.clientId, avatar: state.avatarData, banner: state.bannerData, bio: member.bio })).catch(() => undefined);
-    }
-    broadcastRoster(true);
-    state.guestConnections.forEach((connection) => {
-      if (!connection.open) return;
-      void sendProfileMedia(connection, state.clientId, "avatar", state.avatarData);
-      void sendProfileMedia(connection, state.clientId, "banner", state.bannerData);
-    });
-    scheduleServerPersistence();
-    return;
-  }
 
   const self = state.members.find((member) => member.peerId === state.peer.id);
-  if (self) { self.avatar = state.avatarData; self.banner = state.bannerData; self.bio = cleanBio(state.profileBio); self.presence = normalizePresence(state.presenceStatus); }
+  if (self) {
+    self.avatar = state.avatarData;
+    self.banner = state.bannerData;
+    self.bio = cleanBio(state.profileBio);
+    self.presence = normalizePresence(state.presenceStatus);
+    self.name = state.nickname || self.name;
+  }
   renderMembers();
+
+  if (state.isHost) {
+    void Promise.resolve(window.resenhazinhaDesktop?.cacheMemberProfile?.({
+      clientId: state.clientId,
+      avatar: state.avatarData,
+      banner: state.bannerData,
+      bio: cleanBio(state.profileBio),
+    })).catch(() => undefined);
+    scheduleServerPersistence();
+  }
+
   if (state.hostConnection?.open) {
-    state.hostConnection.send({ type: "profile", nickname: state.nickname, bio: cleanBio(state.profileBio), presence: normalizePresence(state.presenceStatus), clientId: state.clientId });
+    state.hostConnection.send({
+      type: "profile",
+      nickname: state.nickname,
+      bio: cleanBio(state.profileBio),
+      presence: normalizePresence(state.presenceStatus),
+      clientId: state.clientId,
+    });
     sendOwnProfileMediaToHost();
   }
 }
@@ -1786,6 +1812,8 @@ async function enterRoom(mode) {
   state.roomCode = roomCode;
   state.joinInviteToken = parsedJoin.inviteToken;
   state.isHost = mode === "create" || mode === "resume-host";
+  state.cloudReady = false;
+  state.cloudOwnerKey = state.isHost ? getOrCreateCloudOwnerKey() : "";
   state.inVoice = false;
   state.voicePresenceRevision = 0;
   state.serverMuted = false;
@@ -1799,7 +1827,7 @@ async function enterRoom(mode) {
   localStorage.setItem("resenhazinha:nickname", nickname);
 
   setLobbyBusy(true);
-  setLobbyStatus(state.isHost ? "Abrindo seu servidor salvo…" : "Conectando ao seu servidor…");
+  setLobbyStatus(state.isHost ? "Conectando seu servidor ao Cloudflare…" : "Conectando ao servidor do Resenhazinha…");
 
   if (state.isHost) {
     const loaded = await loadPersistentServerState(roomCode);
@@ -1813,7 +1841,8 @@ async function enterRoom(mode) {
     }
   }
 
-  state.peer = new Peer(state.isHost ? hostPeerId(roomCode) : undefined, PEER_OPTIONS);
+  // Cloudflare é a autoridade do servidor. PeerJS fica apenas para mídia P2P.
+  state.peer = new Peer(undefined, PEER_OPTIONS);
   bindPeerEvents();
 }
 
@@ -1823,80 +1852,141 @@ function bindPeerEvents() {
     if (state.isHost) {
       state.server.ownerPeerId = state.peer.id;
       state.server.ownerClientId = sanitizeClientId(state.server.ownerClientId) || state.clientId;
-      const self = applyRememberedMemberState(localMember());
-      state.hostMembers.set(state.peer.id, self);
-      state.members = Array.from(state.hostMembers.values());
-      state.peer.on("connection", acceptGuestConnection);
-      if (!state.serverBinding) saveServerBinding({ roomCode: state.roomCode, inviteToken: state.server.inviteToken, isOwner: true, serverName: state.server.name });
-      else if (state.serverBinding.serverName !== state.server.name) saveServerBinding({ ...state.serverBinding, serverName: state.server.name });
-      openRoomView(); renderChatHistory(); void Promise.resolve(window.resenhazinhaDesktop?.cacheMemberProfile?.({ clientId: state.clientId, avatar: state.avatarData, banner: state.bannerData, bio: cleanBio(state.profileBio) })).catch(() => undefined); broadcastRoster(true); scheduleServerPersistence();
-    } else connectToHost();
-  });
-  state.peer.on("call", handleIncomingCall);
-  state.peer.on("disconnected", () => { setConnectionState("Desconectado", "warning"); });
-  state.peer.on("error", (error) => {
-    if (!state.roomEntered) {
-      cleanupMedia(); if (state.peer && !state.peer.destroyed) state.peer.destroy(); state.peer = null; setLobbyBusy(false);
-      const message = error.type === "unavailable-id" ? (state.serverBinding?.isOwner ? "Seu servidor parece já estar aberto em outro lugar." : "Esse código já está sendo usado.") : error.type === "peer-unavailable" ? (state.serverBinding ? "Seu servidor está salvo, mas o anfitrião está offline agora." : "Não encontrei esse servidor. Confira o código com quem criou.") : "Não consegui conectar agora. Verifique sua internet e tente novamente.";
-      setLobbyStatus(message, "error"); return;
+      if (!state.memberRegistry.has(state.clientId)) {
+        state.memberRegistry.set(state.clientId, {
+          clientId: state.clientId,
+          name: state.nickname,
+          bio: cleanBio(state.profileBio),
+          presence: normalizePresence(state.presenceStatus),
+          roleIds: ["membro", "admin"],
+          serverMuted: false,
+          lastSeenAt: Date.now(),
+        });
+      }
+      saveServerBinding({
+        roomCode: state.roomCode,
+        inviteToken: state.server.inviteToken,
+        isOwner: true,
+        serverName: state.server.name,
+        ownerKey: state.cloudOwnerKey,
+        cloudMigrated: Boolean(state.serverBinding?.cloudMigrated),
+      });
     }
-    setConnectionState("Conexão instável", "warning");
+    connectToHost();
+  });
+
+  state.peer.on("call", handleIncomingCall);
+
+  state.peer.on("disconnected", () => {
+    // A mídia já estabelecida não depende do canal de sinalização.
+    setConnectionState(state.hostConnection?.open ? "Nuvem conectada · mídia indisponível" : "Reconectando à nuvem…", "warning");
+  });
+
+  state.peer.on("error", (error) => {
+    console.warn("[Resenhazinha] PeerJS mídia:", error);
+    if (!state.roomEntered && !state.hostConnection?.open) {
+      setLobbyStatus("Não consegui preparar a conexão de mídia. Verifique sua internet e tente novamente.", "error");
+    }
   });
 }
 
 
 function connectToHost(isReconnect = false) {
-  if (!state.peer?.open || state.isHost) return;
+  if (!state.peer?.open || !state.roomCode) return;
   if (state.hostConnection?.open) return;
-  const connection = state.peer.connect(hostPeerId(state.roomCode), { reliable: true, metadata: { nickname: state.nickname, clientId: state.clientId, inviteToken: state.joinInviteToken } });
+  if (state.hostConnection && !state.hostConnection.closed) return;
+
+  const inviteToken = state.isHost
+    ? normalizeInviteToken(state.server.inviteToken || state.serverBinding?.inviteToken)
+    : normalizeInviteToken(state.joinInviteToken || state.serverBinding?.inviteToken);
+
+  const socketUrl = buildCloudSocketUrl({
+    room: state.roomCode,
+    mode: state.isHost ? "create" : "join",
+    clientId: state.clientId,
+    peerId: state.peer.id,
+    nickname: state.nickname,
+    bio: cleanBio(state.profileBio),
+    presence: normalizePresence(state.presenceStatus),
+    inviteToken,
+    serverName: state.server.name,
+    ownerKey: state.isHost ? state.cloudOwnerKey : "",
+    recoverOwner: state.isHost ? "1" : "",
+  });
+
+  const connection = new CloudConnection(socketUrl);
   state.hostConnection = connection;
+
   const timeout = window.setTimeout(() => {
-    if (!connection.open && !state.roomEntered) {
+    if (connection.open) return;
+    if (!state.roomEntered) {
       setLobbyBusy(false);
-      setLobbyStatus(state.serverBinding ? "Seu servidor está salvo, mas o anfitrião está offline. Você não precisa digitar código nenhum; é só tentar de novo quando ele abrir o app." : "O servidor não respondeu. Confira o código e tente novamente.", "error");
+      setLobbyStatus("O servidor Cloudflare não respondeu. Tente novamente em alguns segundos.", "error");
       connection.close();
       if (state.peer && !state.peer.destroyed) state.peer.destroy();
       state.peer = null;
-    } else if (!connection.open && state.roomEntered) {
-      setConnectionState("Servidor offline", "warning");
-
+    } else {
+      setConnectionState("Nuvem offline", "warning");
+      scheduleHostReconnect();
     }
-  }, isReconnect ? 6500 : 10000);
+  }, isReconnect ? 9000 : 12000);
+
   connection.on("open", () => {
     window.clearTimeout(timeout);
     window.clearTimeout(state.reconnectTimer);
     cancelHostDisconnectGrace();
-    connection.send({ type: "join", nickname: state.nickname, bio: cleanBio(state.profileBio), presence: normalizePresence(state.presenceStatus), clientId: state.clientId, inviteToken: state.joinInviteToken });
+
+    connection.send({
+      type: "join",
+      nickname: state.nickname,
+      bio: cleanBio(state.profileBio),
+      presence: normalizePresence(state.presenceStatus),
+      clientId: state.clientId,
+      inviteToken,
+    });
     connection.send({ type: "status", ...localVoicePresenceState() });
+
     startConnectionHeartbeat();
-    window.setTimeout(sendOwnProfileMediaToHost, 60);
-    if (!state.serverBinding) saveServerBinding({ roomCode: state.roomCode, inviteToken: state.joinInviteToken || state.server.inviteToken, isOwner: false, serverName: state.server.name });
-    if (!state.roomEntered) openRoomView();
-    setConnectionState("Conectado", "ok");
+    window.setTimeout(sendOwnProfileMediaToHost, 120);
+
+    if (!state.serverBinding) {
+      saveServerBinding({
+        roomCode: state.roomCode,
+        inviteToken,
+        isOwner: state.isHost,
+        serverName: state.server.name,
+        ownerKey: state.isHost ? state.cloudOwnerKey : "",
+        cloudMigrated: state.isHost,
+      });
+    }
+
+    setConnectionState("Nuvem conectada", "ok");
   });
+
   connection.on("data", (message) => {
     if (state.hostConnection === connection) handleHostMessage(message);
   });
+
   connection.on("close", () => {
-    // Uma conexão antiga pode terminar alguns milissegundos depois de a nova
-    // já ter aberto. Nesse caso ela não pode derrubar a sessão recuperada.
+    window.clearTimeout(timeout);
     if (state.hostConnection !== connection) return;
     state.hostConnection = null;
+    state.cloudReady = false;
     stopConnectionHeartbeat();
     if (state.roomEntered) {
-      // Não derrubamos a call por uma queda curta do canal de dados. Isso evita
-      // expulsar quem está apenas assistindo uma transmissão sem mexer no PC.
-      setConnectionState("Reconectando…", "warning");
-      scheduleHostDisconnectGrace();
+      setConnectionState("Reconectando à nuvem…", "warning");
       scheduleHostReconnect(700);
     }
   });
+
   connection.on("error", () => {
-    // Erros de uma tentativa obsoleta também não devem interferir com uma
-    // conexão mais nova que já substituiu este objeto.
     if (state.hostConnection !== connection) return;
-    if (!state.roomEntered) setLobbyStatus(state.serverBinding ? "Seu servidor está salvo, mas está offline agora." : "Não consegui entrar nesse servidor.", "error");
-    else { setConnectionState("Reconectando…", "warning"); scheduleHostDisconnectGrace(); scheduleHostReconnect(900); }
+    if (!state.roomEntered) {
+      setLobbyStatus("Não consegui conectar ao servidor Cloudflare do Resenhazinha.", "error");
+    } else {
+      setConnectionState("Reconectando à nuvem…", "warning");
+      scheduleHostReconnect(900);
+    }
   });
 }
 
@@ -2040,6 +2130,54 @@ function handleGuestMessage(peerId, message) {
 function handleHostMessage(message) {
   if (!message || typeof message !== "object") return;
   if (message.type === "heartbeat-ack") return;
+
+  if (message.type === "cloud-ready") {
+    state.cloudReady = true;
+    if (state.isHost && normalizeInviteToken(message.inviteToken)) {
+      state.server.inviteToken = normalizeInviteToken(message.inviteToken);
+    }
+
+    if (state.isHost && message.created && state.hostConnection?.open) {
+      const backup = persistentServerPayload();
+      state.hostConnection.send({
+        type: "cloud-bootstrap",
+        server: backup.server,
+        members: backup.members,
+        chatMessages: backup.chatMessages,
+      });
+    }
+
+    saveServerBinding({
+      roomCode: state.roomCode,
+      inviteToken: state.server.inviteToken || state.joinInviteToken || state.serverBinding?.inviteToken,
+      isOwner: state.isHost,
+      serverName: state.server.name,
+      ownerKey: state.isHost ? state.cloudOwnerKey : "",
+      cloudMigrated: state.isHost,
+    });
+
+    if (!state.roomEntered) {
+      openRoomView();
+      renderChatHistory();
+    }
+    setConnectionState("Nuvem conectada", "ok");
+    return;
+  }
+
+  if (message.type === "room-not-found") {
+    setLobbyBusy(false);
+    setConnectionState("Servidor não encontrado", "danger");
+    if (!state.roomEntered) setLobbyStatus("Esse servidor ainda não existe na nuvem. O Owner precisa abrir a versão nova uma vez.", "error");
+    return;
+  }
+
+  if (message.type === "owner-auth-failed") {
+    setLobbyBusy(false);
+    setConnectionState("Falha ao validar Owner", "danger");
+    toast("Não consegui validar o Owner no servidor Cloudflare.", "error");
+    return;
+  }
+
   if (message.type === "force-voice-leave") {
     const incomingRevision = normalizeVoicePresenceRevision(message.voicePresenceRevision);
     if (shouldApplyVoicePresenceSnapshot(state.voicePresenceRevision, incomingRevision)) {
@@ -2252,7 +2390,7 @@ function composeRosterMembers() {
 
 
 function broadcastRoster(includeProfiles = false) {
-  if (!state.isHost) return;
+  if (!state.isHost || state.cloudMode) return;
   state.members = composeRosterMembers();
   const payload = { type: "roster", includeProfiles, server: state.server,
     members: state.members.map((member) => ({
@@ -2324,8 +2462,7 @@ function recordModeration(peerId, action) {
 
 function requestAdminAction(action, payload = {}) {
   if (!canCurrentUserAdmin()) { toast("Você não tem permissão de administrador.", "error"); return; }
-  if (state.isHost) { applyAdminAction(state.peer.id, action, payload); return; }
-  if (!state.hostConnection?.open) { toast("O servidor está reconectando. Tente novamente.", "error"); return; }
+  if (!state.hostConnection?.open) { toast("O servidor Cloudflare está reconectando. Tente novamente.", "error"); return; }
   state.hostConnection.send({ type: "admin-action", action, payload });
 }
 
@@ -2502,7 +2639,7 @@ function createRoleFromSettings() {
   requestAdminAction("role-create", { name, color: elements.roleColorInput.value, admin: elements.roleAdminInput.checked });
   elements.roleNameInput.value = "";
   elements.roleAdminInput.checked = false;
-  if (state.isHost) { renderRoleSettings(); scheduleServerPersistence(); }
+  if (state.isHost && !state.cloudMode) { renderRoleSettings(); scheduleServerPersistence(); }
 }
 function openServerSettings() {
   if (!canCurrentUserAdmin()) return;
@@ -2624,17 +2761,16 @@ function closeDiagnostics() {
 }
 
 function diagnosticsStatusLabel() {
-  if (!state.peer?.open) return "Desconectado";
-  if (state.isHost) return "Host online";
-  if (state.hostConnection?.open) return "Conectado ao host";
-  return "Reconectando ao host";
+  if (!state.peer?.open) return "Mídia desconectada";
+  if (state.hostConnection?.open) return "Cloudflare conectado";
+  return "Reconectando ao Cloudflare";
 }
 
 async function refreshDiagnostics() {
   const jobs = [...state.voiceCalls.entries()].map(([peerId, call]) => collectVoiceStats(peerId, call));
   await Promise.allSettled(jobs);
   const summary = [
-    ["Versão", `v${state.appInfo?.version || "4.3.0"}`],
+    ["Versão", `v${state.appInfo?.version || "4.4.0"}`],
     ["Servidor", diagnosticsStatusLabel()],
     ["Call", state.inVoice ? "Conectado" : "Fora da call"],
     ["Microfone", state.serverMuted ? "Mutado pelo servidor" : state.muted || state.deafened ? "Mutado" : state.inVoice ? "Ligado" : "Inativo"],
@@ -2658,7 +2794,7 @@ async function refreshDiagnostics() {
 
 function diagnosticsText() {
   const lines = [
-    `Resenhazinha v${state.appInfo?.version || "4.3.0"}`,
+    `Resenhazinha v${state.appInfo?.version || "4.4.0"}`,
     `Servidor: ${diagnosticsStatusLabel()}`,
     `Call: ${state.inVoice ? "sim" : "não"} | voz peers: ${state.voiceCalls.size} | streams: ${state.screenStreams.size}`,
   ];
@@ -3463,25 +3599,16 @@ async function sendChatMessage() {
   const replyToMessageId = sanitizeTransferId(state.pendingReplyMessageId);
   if (!state.server.textChannel.exists) { toast("Esse servidor não tem um canal de texto agora.", "error"); return; }
   if ((!text && files.length === 0) || !state.peer?.open || state.chatSending) return;
-  if (!state.isHost && !state.hostConnection?.open) { toast("O chat está reconectando. Tente de novo em um instante."); return; }
+  if (!state.hostConnection?.open) { toast("O chat está reconectando ao Cloudflare. Tente de novo em um instante."); return; }
 
   closeMentionMenu();
   state.chatSending = true; updateChatComposerState();
   try {
     if (files.length === 0) {
-      if (state.isHost) acceptChatMessage(state.peer.id, text, [], replyToMessageId);
-      else state.hostConnection.send({ type: "chat-send", text, replyToMessageId });
+      state.hostConnection.send({ type: "chat-send", text, replyToMessageId });
     } else {
       const outgoing = await prepareOutgoingChatAttachments(files);
-      if (state.isHost) {
-        for (const entry of outgoing) {
-          const result = await saveChatAttachmentBytes(entry.meta.id, entry.bytes);
-          if (!result) throw new Error("save-failed");
-        }
-        acceptChatMessage(state.peer.id, text, outgoing.map((entry) => entry.meta), replyToMessageId);
-      } else {
-        await uploadChatMessageToHost(text, outgoing, replyToMessageId);
-      }
+      await uploadChatMessageToHost(text, outgoing, replyToMessageId);
     }
     elements.chatInput.value = "";
     state.pendingChatFiles = [];
@@ -3630,8 +3757,7 @@ function currentUserReacted(message, emoji) {
 function requestChatReaction(messageId, emoji) {
   const id = sanitizeTransferId(messageId);
   if (!id || !REACTION_EMOJIS.includes(emoji)) return;
-  if (state.isHost) acceptChatReaction(state.peer.id, id, emoji);
-  else if (state.hostConnection?.open) state.hostConnection.send({ type: "chat-reaction", messageId: id, emoji });
+  if (state.hostConnection?.open) state.hostConnection.send({ type: "chat-reaction", messageId: id, emoji });
 }
 
 function acceptChatReaction(peerId, messageId, emoji) {
@@ -3839,13 +3965,11 @@ async function acceptChatDelete(peerId, messageId) {
 }
 
 function requestChatEdit(messageId, text) {
-  if (state.isHost) acceptChatEdit(state.peer.id, messageId, text);
-  else if (state.hostConnection?.open) state.hostConnection.send({ type: "chat-edit", messageId, text });
+  if (state.hostConnection?.open) state.hostConnection.send({ type: "chat-edit", messageId, text });
 }
 
 function requestChatDelete(messageId) {
-  if (state.isHost) void acceptChatDelete(state.peer.id, messageId);
-  else if (state.hostConnection?.open) state.hostConnection.send({ type: "chat-delete", messageId });
+  if (state.hostConnection?.open) state.hostConnection.send({ type: "chat-delete", messageId });
 }
 
 function applyIncomingChatEdit(message) {
@@ -3869,7 +3993,7 @@ function appendChatMessage(message) {
   state.chatMessages.push(message);
   while (state.chatMessages.length > MAX_CHAT_HISTORY) {
     const removed = state.chatMessages.shift();
-    if (state.isHost) void deleteMessageAttachments(removed); else releaseMessageAttachmentCache(removed);
+    if (state.isHost && !state.cloudMode) void deleteMessageAttachments(removed); else releaseMessageAttachmentCache(removed);
   }
   const incoming = message.clientId ? message.clientId !== state.clientId : message.peerId !== state.peer?.id;
   const mentioned = incoming && messageMentionsCurrentUser(message);
@@ -3967,7 +4091,7 @@ function createChatEditBox(message) {
   const input = document.createElement("textarea"); input.rows = 2; input.maxLength = 500; input.value = message.text; input.dataset.editMessage = message.id;
   const actions = document.createElement("div"); actions.className = "chat-edit-actions";
   const cancel = document.createElement("button"); cancel.type = "button"; cancel.textContent = "Cancelar"; cancel.addEventListener("click", () => { state.editingMessageId = null; renderChatHistory(); });
-  const save = document.createElement("button"); save.type = "button"; save.className = "chat-edit-save"; save.textContent = "Salvar"; const submit = () => { const text = normalizeChatText(input.value); if (!text && !(message.attachments || []).length) return; requestChatEdit(message.id, text); if (!state.isHost) { state.editingMessageId = null; renderChatHistory(); } }; save.addEventListener("click", submit); input.addEventListener("keydown", (event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submit(); } if (event.key === "Escape") { state.editingMessageId = null; renderChatHistory(); } });
+  const save = document.createElement("button"); save.type = "button"; save.className = "chat-edit-save"; save.textContent = "Salvar"; const submit = () => { const text = normalizeChatText(input.value); if (!text && !(message.attachments || []).length) return; requestChatEdit(message.id, text); if (state.cloudMode || !state.isHost) { state.editingMessageId = null; renderChatHistory(); } }; save.addEventListener("click", submit); input.addEventListener("keydown", (event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submit(); } if (event.key === "Escape") { state.editingMessageId = null; renderChatHistory(); } });
   actions.append(cancel, save); wrap.append(input, actions); return wrap;
 }
 
@@ -4535,9 +4659,7 @@ async function ensureAttachmentUrl(meta) {
   const promise = waitForAttachment(cleanMeta.id);
   if (!state.attachmentRequests.has(cleanMeta.id)) {
     state.attachmentRequests.add(cleanMeta.id);
-    if (state.isHost) {
-      void readStoredChatAttachment(cleanMeta.id).then((bytes) => { if (bytes) cacheAttachmentBlob(cleanMeta, bytes); else rejectAttachmentWaiters(cleanMeta.id); }).catch(() => rejectAttachmentWaiters(cleanMeta.id));
-    } else if (state.hostConnection?.open) state.hostConnection.send({ type: "attachment-request", attachmentId: cleanMeta.id });
+    if (state.hostConnection?.open) state.hostConnection.send({ type: "attachment-request", attachmentId: cleanMeta.id });
     else rejectAttachmentWaiters(cleanMeta.id);
   }
   return promise;
@@ -5212,35 +5334,28 @@ function applyAllPlaybackAudioSettings() {
 function publishLocalStatus() {
   if (!state.peer?.open) return;
   const voiceState = localVoicePresenceState();
-  if (state.isHost) {
-    const member = state.hostMembers.get(state.peer.id);
-    if (member) {
-      member.muted = state.muted;
-      member.deafened = state.deafened;
-      member.inVoice = voiceState.inVoice;
-      member.voiceJoinedAt = voiceState.voiceJoinedAt;
-      member.voiceSessionId = voiceState.voiceSessionId;
-      member.voicePresenceRevision = voiceState.voicePresenceRevision;
-      member.serverMuted = state.serverMuted;
-      member.presence = normalizePresence(state.presenceStatus);
-      rememberMember(member);
-    }
-    broadcastRoster(false); scheduleServerPersistence();
-  } else if (state.hostConnection?.open) {
-    state.hostConnection.send({ type: "status", ...voiceState });
-    const self = state.members.find((member) => member.peerId === state.peer.id);
-    if (self) {
-      self.muted = state.muted;
-      self.deafened = state.deafened;
-      self.inVoice = voiceState.inVoice;
-      self.voiceJoinedAt = voiceState.voiceJoinedAt;
-      self.voiceSessionId = voiceState.voiceSessionId;
-      self.voicePresenceRevision = voiceState.voicePresenceRevision;
-      self.serverMuted = state.serverMuted;
-      self.presence = normalizePresence(state.presenceStatus);
-    }
-    renderMembers(); renderVoiceGrid(); reconcileVoiceCalls(); reconcileCameraCalls();
+
+  const self = state.members.find((member) => member.peerId === state.peer.id);
+  if (self) {
+    self.muted = state.muted;
+    self.deafened = state.deafened;
+    self.inVoice = voiceState.inVoice;
+    self.voiceJoinedAt = voiceState.voiceJoinedAt;
+    self.voiceSessionId = voiceState.voiceSessionId;
+    self.voicePresenceRevision = voiceState.voicePresenceRevision;
+    self.serverMuted = state.serverMuted;
+    self.presence = normalizePresence(state.presenceStatus);
   }
+
+  if (state.hostConnection?.open) {
+    state.hostConnection.send({ type: "status", ...voiceState });
+  }
+
+  if (state.isHost) scheduleServerPersistence();
+  renderMembers();
+  renderVoiceGrid();
+  reconcileVoiceCalls();
+  reconcileCameraCalls();
 }
 
 
@@ -5703,14 +5818,7 @@ function stopScreenShare() {
 function announceScreenState(started, stoppedSessionId = "") {
   const screenSessionId = started ? callSessions.sessionId("screen") : normalizeMediaSessionId(stoppedSessionId);
   const message = { type: started ? "screen-started" : "screen-stopped", screenSessionId };
-  if (state.isHost) {
-    if (started) state.activeScreens.set(state.peer.id, { peerId: state.peer.id, name: state.nickname, screenSessionId });
-    else state.activeScreens.delete(state.peer.id);
-    state.activeScreen = state.activeScreens.values().next().value || null;
-    broadcastRoster();
-  } else if (state.hostConnection?.open) {
-    state.hostConnection.send(message);
-  }
+  if (state.hostConnection?.open) state.hostConnection.send(message);
 }
 
 function showScreenStage(stream, ownerName, isLocal, profile = null) {
