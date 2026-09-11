@@ -84,6 +84,8 @@ const state = {
   pendingProfileMedia: new Map(),
   profileResyncTimer: null,
   mediaReconcileTimers: new Set(),
+  peerReconnectTimer: null,
+  peerReconnectAttempts: 0,
   members: [],
   voiceCalls: callSessions.map("voice"),
   voiceStats: new Map(),
@@ -2081,8 +2083,77 @@ async function enterRoom(mode) {
 }
 
 
+function peerSignalingReady() {
+  return Boolean(state.peer && !state.peer.destroyed && state.peer.open && !state.peer.disconnected);
+}
+
+function schedulePeerSignalingReconnect(delayMs = 350) {
+  if (!state.peer || state.peer.destroyed) return;
+  window.clearTimeout(state.peerReconnectTimer);
+  state.peerReconnectTimer = window.setTimeout(() => {
+    state.peerReconnectTimer = null;
+    if (!state.peer || state.peer.destroyed || peerSignalingReady()) return;
+
+    if (!state.peer.disconnected) {
+      // Se o Peer ainda está conectando pela primeira vez, aguardamos o evento open.
+      schedulePeerSignalingReconnect(Math.min(1800, Math.max(500, delayMs * 1.5)));
+      return;
+    }
+
+    try {
+      state.peerReconnectAttempts += 1;
+      state.peer.reconnect();
+    } catch (error) {
+      console.warn("[Resenhazinha] Falha ao reconectar sinalização PeerJS.", error);
+    }
+
+    if (!peerSignalingReady()) {
+      schedulePeerSignalingReconnect(Math.min(3000, 500 + state.peerReconnectAttempts * 350));
+    }
+  }, Math.max(100, Number(delayMs) || 350));
+}
+
+function ensurePeerSignaling(reason = "media") {
+  if (peerSignalingReady()) return true;
+  if (!state.peer || state.peer.destroyed) return false;
+
+  console.warn("[Resenhazinha] Sinalização PeerJS indisponível; tentando recuperar.", {
+    reason,
+    open: Boolean(state.peer.open),
+    disconnected: Boolean(state.peer.disconnected),
+  });
+
+  if (state.peer.disconnected) {
+    try {
+      state.peer.reconnect();
+      state.peerReconnectAttempts += 1;
+    } catch (error) {
+      console.warn("[Resenhazinha] PeerJS reconnect falhou.", error);
+    }
+  }
+
+  schedulePeerSignalingReconnect();
+  return false;
+}
+
+function onPeerSignalingReady() {
+  window.clearTimeout(state.peerReconnectTimer);
+  state.peerReconnectTimer = null;
+  state.peerReconnectAttempts = 0;
+
+  if (!state.roomEntered) return;
+  if (state.hostConnection?.open) setConnectionState("Nuvem conectada · mídia pronta", "ok");
+
+  if (state.inVoice) {
+    publishLocalStatus();
+    scheduleVoicePresenceSyncBurst();
+    scheduleMediaReconcileBurst();
+  }
+}
+
 function bindPeerEvents() {
   state.peer.on("open", () => {
+    onPeerSignalingReady();
     if (state.isHost) {
       state.server.ownerPeerId = state.peer.id;
       state.server.ownerClientId = sanitizeClientId(state.server.ownerClientId) || state.clientId;
@@ -2112,12 +2183,17 @@ function bindPeerEvents() {
   state.peer.on("call", handleIncomingCall);
 
   state.peer.on("disconnected", () => {
-    // A mídia já estabelecida não depende do canal de sinalização.
-    setConnectionState(state.hostConnection?.open ? "Nuvem conectada · mídia indisponível" : "Reconectando à nuvem…", "warning");
+    // Só recuperamos a sinalização do PeerJS. Chamadas/streams WebRTC já
+    // estabelecidos ficam intactos e ninguém é removido da call.
+    setConnectionState(state.hostConnection?.open ? "Nuvem conectada · recuperando mídia…" : "Reconectando à nuvem…", "warning");
+    schedulePeerSignalingReconnect(150);
   });
 
   state.peer.on("error", (error) => {
     console.warn("[Resenhazinha] PeerJS mídia:", error);
+    if (["network", "socket-error", "server-error", "disconnected"].includes(String(error?.type || ""))) {
+      schedulePeerSignalingReconnect(250);
+    }
     if (!state.roomEntered && !state.hostConnection?.open) {
       setLobbyStatus("Não consegui preparar a conexão de mídia. Verifique sua internet e tente novamente.", "error");
     }
@@ -2409,7 +2485,8 @@ function handleHostMessage(message) {
       openRoomView();
       renderChatHistory();
     }
-    setConnectionState("Nuvem conectada", "ok");
+    setConnectionState(peerSignalingReady() ? "Nuvem conectada · mídia pronta" : "Nuvem conectada · preparando mídia…", peerSignalingReady() ? "ok" : "warning");
+    ensurePeerSignaling("cloud-ready");
     unlockUiAudio();
     if (state.hostConnection?.open) {
       state.hostConnection.send({ type: "profile-media-request-all" });
@@ -3018,9 +3095,9 @@ function closeDiagnostics() {
 }
 
 function diagnosticsStatusLabel() {
-  if (!state.peer?.open) return "Mídia desconectada";
-  if (state.hostConnection?.open) return "Cloudflare conectado";
-  return "Reconectando ao Cloudflare";
+  if (!state.hostConnection?.open) return "Reconectando ao Cloudflare";
+  if (!peerSignalingReady()) return "Cloudflare conectado · PeerJS reconectando";
+  return "Cloudflare conectado · mídia pronta";
 }
 
 async function refreshDiagnostics() {
@@ -4750,6 +4827,7 @@ async function joinVoiceChannel() {
     toast("Não consegui acessar o microfone. Libere a permissão para entrar na call.", "error");
     return;
   }
+  ensurePeerSignaling("join-voice");
   callSessions.beginSession("voice");
   state.voicePresenceRevision = normalizeVoicePresenceRevision(state.voicePresenceRevision) + 1;
   state.inVoice = true; state.voiceJoinedAt = Date.now(); state.resumeVoiceAfterReconnect = false;
@@ -5084,7 +5162,11 @@ function renderMembers() {
 }
 
 function reconcileVoiceCalls() {
-  if (!state.peer?.open || !state.localStream) return;
+  if (!state.localStream) return;
+  if (!peerSignalingReady()) {
+    ensurePeerSignaling("voice-reconcile");
+    return;
+  }
   const activeIds = new Set(state.members.filter((member) => member.inVoice).map((member) => member.peerId));
   state.voiceCalls.forEach((call, peerId) => {
     if (!activeIds.has(peerId)) {
@@ -5145,6 +5227,7 @@ async function toggleCamera() {
     if (!track) throw new Error("camera-track-missing");
     track.contentHint = "motion";
     track.addEventListener("ended", () => { if (state.cameraStream === stream) stopCamera(); }, { once: true });
+    ensurePeerSignaling("toggle-camera");
     callSessions.beginSession("camera");
     state.cameraStream = stream;
     reconcileCameraCalls();
@@ -5165,7 +5248,11 @@ function reconcileCameraCalls() {
       callSessions.close("cameraOut", peerId);
     }
   });
-  if (!state.cameraStream || !state.peer?.open || !state.inVoice) return;
+  if (!state.cameraStream || !state.inVoice) return;
+  if (!peerSignalingReady()) {
+    ensurePeerSignaling("camera-reconcile");
+    return;
+  }
   state.members.forEach((member) => {
     if (!member.inVoice || member.peerId === state.peer.id || state.cameraCallsOut.has(member.peerId)) return;
     const call = state.peer.call(member.peerId, state.cameraStream, { metadata: { kind: "camera", protocolVersion: CALL_PROTOCOL_VERSION, voiceSessionId: callSessions.sessionId("voice"), cameraSessionId: callSessions.sessionId("camera"), cameraName: state.nickname, clientId: state.clientId } });
@@ -5337,7 +5424,12 @@ function handleVoiceCallDropped(call) {
 }
 
 function scheduleVoiceReconnect(peerId) {
-  if (!state.inVoice || !state.peer?.open || !shouldInitiateVoiceCall(state.peer.id, peerId) || !state.members.some((member) => member.peerId === peerId && member.inVoice)) return;
+  if (!state.inVoice || !state.members.some((member) => member.peerId === peerId && member.inVoice)) return;
+  if (!peerSignalingReady()) {
+    ensurePeerSignaling("voice-retry");
+    return;
+  }
+  if (!shouldInitiateVoiceCall(state.peer.id, peerId)) return;
   callSessions.scheduleRetry("voice", peerId, VOICE_RECONNECT_DELAYS, ({ sessionId }) => {
     if (!state.inVoice || sessionId !== callSessions.sessionId("voice")) return;
     reconcileVoiceCalls();
@@ -6001,6 +6093,7 @@ async function captureDisplayMedia(includeAudio) {
 }
 
 function beginScreenShare(stream) {
+  ensurePeerSignaling("begin-screen-share");
   const screenSessionId = callSessions.beginSession("screen");
   state.screenStream = stream;
   const videoTrack = stream.getVideoTracks()[0];
@@ -6058,7 +6151,11 @@ function reconcileScreenCalls() {
       clearScreenStage(peerId);
     }
   });
-  if (!state.screenStream || !state.peer?.open || !state.inVoice) return;
+  if (!state.screenStream || !state.inVoice) return;
+  if (!peerSignalingReady()) {
+    ensurePeerSignaling("screen-reconcile");
+    return;
+  }
   state.screenCallsOut.forEach((call, peerId) => {
     if (!activeIds.has(peerId)) {
       callSessions.cancelRetries("screen", peerId);
@@ -6352,6 +6449,9 @@ function teardownConnections() {
   state.activitySoundInitialized = false;
   window.clearTimeout(state.profileResyncTimer);
   state.profileResyncTimer = null;
+  window.clearTimeout(state.peerReconnectTimer);
+  state.peerReconnectTimer = null;
+  state.peerReconnectAttempts = 0;
   state.mediaReconcileTimers.forEach((timer) => window.clearTimeout(timer));
   state.mediaReconcileTimers.clear();
   state.lastVoicePeers = new Set();
