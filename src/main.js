@@ -41,7 +41,7 @@ const DIAGNOSTIC_INTERVAL_MS = 5000;
 const VOICE_RECONNECT_DELAYS = [700, 1500, 3000, 5000];
 const SCREEN_RECONNECT_DELAYS = [900, 1800, 3600];
 const CAMERA_RECONNECT_DELAYS = [1000, 2500, 5000];
-const MEDIA_NEGOTIATION_TIMEOUT_MS = 12_000;
+const MEDIA_NEGOTIATION_TIMEOUT_MS = 30_000;
 const CONNECTION_HEARTBEAT_MS = 12000;
 const CONNECTION_GRACE_MS = 30000;
 const MAX_SERVER_ROLES = 20;
@@ -5305,86 +5305,116 @@ function refreshMemberPeerForCall(call) {
 }
 
 function handleIncomingCall(call) {
-  if (String(call.metadata?.kind || "").startsWith("camera")) {
-    const member = refreshMemberPeerForCall(call);
+  const kind = String(call.metadata?.kind || "voice");
+  const member = refreshMemberPeerForCall(call);
+
+  // Regra simples e confiável: a oferta veio de um membro conhecido do servidor
+  // e nós estamos na call -> aceita. SessionId continua sendo usado para
+  // substituir chamadas antigas, mas nunca bloqueia o primeiro handshake.
+  if (!state.inVoice || !state.server.voiceChannel.exists || !member || member.offlineSnapshot) {
+    try { call.close(); } catch (_error) {}
+    return;
+  }
+
+  if (kind.startsWith("camera")) {
     const remoteSessionId = normalizeMediaSessionId(call.metadata?.voiceSessionId);
     const remoteCameraSessionId = normalizeMediaSessionId(call.metadata?.cameraSessionId);
-    const expectedRemoteSessionId = normalizeMediaSessionId(member?.voiceSessionId);
-    if (!state.inVoice || !state.server.voiceChannel.exists || !member?.inVoice || (remoteSessionId && expectedRemoteSessionId && remoteSessionId !== expectedRemoteSessionId)) { call.close(); return; }
-    const previousCall = state.cameraCallsIn.get(call.peer);
-    const previousCameraSessionId = normalizeMediaSessionId(callSessions.detail("cameraIn", call.peer, previousCall)?.cameraSessionId);
-    if (previousCall && previousCameraSessionId && remoteCameraSessionId === previousCameraSessionId) { call.close(); return; }
+
     call.answer(new MediaStream());
-    callSessions.adopt("cameraIn", call.peer, call, { voiceSessionId: remoteSessionId, cameraSessionId: remoteCameraSessionId });
+    callSessions.adopt("cameraIn", call.peer, call, {
+      voiceSessionId: remoteSessionId,
+      cameraSessionId: remoteCameraSessionId,
+    });
+
     call.on("stream", (stream) => {
       if (!callSessions.isCurrent("cameraIn", call.peer, call)) return;
       state.cameraStreams.set(call.peer, stream);
-      stream.getVideoTracks().forEach((track) => track.addEventListener("ended", () => handleIncomingCameraDropped(call), { once: true }));
-      renderVoiceMiniList(); renderVoiceGrid();
+      stream.getVideoTracks().forEach((track) => {
+        track.addEventListener("ended", () => handleIncomingCameraDropped(call), { once: true });
+      });
+      renderVoiceMiniList();
+      renderVoiceGrid();
     });
+
     const ended = () => handleIncomingCameraDropped(call);
-    call.on("close", ended); call.on("error", ended); return;
+    call.on("close", ended);
+    call.on("error", ended);
+    return;
   }
-  if (String(call.metadata?.kind || "").startsWith("screen")) {
-    const sharer = refreshMemberPeerForCall(call);
+
+  if (kind.startsWith("screen")) {
     const remoteSessionId = normalizeMediaSessionId(call.metadata?.screenSessionId);
     const announcedSessionId = normalizeMediaSessionId(state.activeScreens.get(call.peer)?.screenSessionId);
-    const invalidSession = Boolean(remoteSessionId && announcedSessionId && remoteSessionId !== announcedSessionId);
-    if (!state.inVoice || !state.server.voiceChannel.exists || !sharer?.inVoice || invalidSession) { call.close(); return; }
-    const previousCall = state.screenCallsIn.get(call.peer);
-    const previousSessionId = normalizeMediaSessionId(callSessions.detail("screenIn", call.peer, previousCall)?.screenSessionId);
-    if (previousCall && previousSessionId && remoteSessionId === previousSessionId) { call.close(); return; }
+
     call.answer(new MediaStream());
-    callSessions.adopt("screenIn", call.peer, call, { screenSessionId: remoteSessionId });
+    callSessions.adopt("screenIn", call.peer, call, {
+      screenSessionId: remoteSessionId || announcedSessionId,
+    });
+
     callSessions.armNegotiation("screenIn", call.peer, call, MEDIA_NEGOTIATION_TIMEOUT_MS, () => {
       handleIncomingScreenDropped(call);
       try { call.close(); } catch (_error) {}
     });
+
     call.on("stream", (stream) => {
       if (!callSessions.isCurrent("screenIn", call.peer, call)) return;
       callSessions.clearNegotiation("screenIn", call.peer);
-      const name = call.metadata?.sharerName || memberName(call.peer) || "Um amigo";
+      callSessions.markHealthy("screen", call.peer);
+
+      const name = call.metadata?.sharerName || member.name || memberName(call.peer) || "Um amigo";
       const screenSessionId = remoteSessionId || announcedSessionId;
-      state.activeScreens.set(call.peer, { peerId: call.peer, name, screenSessionId });
+
+      state.activeScreens.set(call.peer, {
+        peerId: call.peer,
+        name,
+        screenSessionId,
+      });
       state.activeScreen = state.activeScreens.values().next().value || null;
-      showScreenStage(stream, name, false, { peerId: call.peer, quality: call.metadata?.quality, fps: call.metadata?.fps, screenSessionId, ownerCall: call });
-      stream.getTracks().forEach((track) => track.addEventListener("ended", () => handleIncomingScreenDropped(call), { once: true }));
+
+      showScreenStage(stream, name, false, {
+        peerId: call.peer,
+        quality: call.metadata?.quality,
+        fps: call.metadata?.fps,
+        screenSessionId,
+        ownerCall: call,
+      });
+
+      stream.getTracks().forEach((track) => {
+        track.addEventListener("ended", () => handleIncomingScreenDropped(call), { once: true });
+      });
+
       renderMembers();
+      renderScreenStage();
     });
+
     call.on("close", () => handleIncomingScreenDropped(call));
     call.on("error", () => handleIncomingScreenDropped(call));
     return;
   }
-  const caller = refreshMemberPeerForCall(call);
+
   const remoteSessionId = normalizeMediaSessionId(call.metadata?.voiceSessionId);
   const remoteRevision = normalizeVoicePresenceRevision(call.metadata?.voicePresenceRevision);
-  const callerRevision = normalizeVoicePresenceRevision(caller?.voicePresenceRevision);
-  let expectedRemoteSessionId = normalizeMediaSessionId(caller?.voiceSessionId);
 
-  // A própria oferta WebRTC é uma prova mais nova de presença que um roster
-  // atrasado. Isso evita que dois usuários entrem na call e cada lado continue
-  // se vendo sozinho até o próximo roster.
-  if (caller && !caller.offlineSnapshot && remoteSessionId && shouldApplyVoicePresenceSnapshot(callerRevision, remoteRevision)) {
-    if (!caller.inVoice || !expectedRemoteSessionId || expectedRemoteSessionId !== remoteSessionId) {
-      caller.inVoice = true;
-      caller.voiceJoinedAt = normalizeVoiceJoinedAt(caller.voiceJoinedAt) || Date.now();
-      caller.voiceSessionId = remoteSessionId;
-      caller.voicePresenceRevision = Math.max(callerRevision, remoteRevision);
-      expectedRemoteSessionId = remoteSessionId;
-      renderMembers();
-      renderVoiceGrid();
-    }
-  }
+  // A própria oferta de voz confirma que o peer remoto está tentando participar
+  // desta call. Atualizamos o snapshot local ao invés de rejeitar a oferta por
+  // um roster/sessionId que possa ter chegado atrasado.
+  member.inVoice = true;
+  member.voiceJoinedAt = normalizeVoiceJoinedAt(member.voiceJoinedAt) || Date.now();
+  if (remoteSessionId) member.voiceSessionId = remoteSessionId;
+  member.voicePresenceRevision = Math.max(
+    normalizeVoicePresenceRevision(member.voicePresenceRevision),
+    remoteRevision,
+  );
 
-  const invalidSession = Boolean(remoteSessionId && expectedRemoteSessionId && remoteSessionId !== expectedRemoteSessionId);
-  const wrongDirection = shouldInitiateVoiceCall(state.peer?.id, call.peer);
-  if (!state.inVoice || !state.server.voiceChannel.exists || !caller || caller.offlineSnapshot || (!caller.inVoice && !remoteSessionId) || invalidSession || wrongDirection || state.voiceCalls.has(call.peer)) {
-    call.close();
-    if (wrongDirection) window.setTimeout(reconcileVoiceCalls, 0);
-    return;
-  }
   call.answer(state.localStream || new MediaStream());
-  registerVoiceCall(call, { direction: "inbound", remoteSessionId, remoteRevision });
+  registerVoiceCall(call, {
+    direction: "inbound",
+    remoteSessionId,
+    remoteRevision,
+  });
+
+  renderMembers();
+  renderVoiceGrid();
 }
 
 function handleIncomingCameraDropped(call) {
@@ -5402,6 +5432,23 @@ function handleIncomingScreenDropped(call) {
 
 function registerVoiceCall(call, detail = {}) {
   if (!callSessions.adopt("voice", call.peer, call, detail)) return;
+
+  const pc = call?.peerConnection || call?._pc;
+  if (pc && !pc._resenhazinhaStateWatch) {
+    pc._resenhazinhaStateWatch = true;
+    const reportState = () => {
+      console.info("[Resenhazinha WebRTC]", {
+        kind: "voice",
+        peerId: call.peer,
+        connectionState: pc.connectionState,
+        iceConnectionState: pc.iceConnectionState,
+        iceGatheringState: pc.iceGatheringState,
+        signalingState: pc.signalingState,
+      });
+    };
+    pc.addEventListener?.("connectionstatechange", reportState);
+    pc.addEventListener?.("iceconnectionstatechange", reportState);
+  }
   callSessions.armNegotiation("voice", call.peer, call, MEDIA_NEGOTIATION_TIMEOUT_MS, () => {
     handleVoiceCallDropped(call);
     try { call.close(); } catch (_error) {}
@@ -6144,9 +6191,9 @@ function tuneScreenCall(call) {
 function reconcileScreenCalls() {
   const activeIds = new Set(state.members.filter((member) => member.inVoice).map((member) => member.peerId));
   state.screenCallsIn.forEach((call, peerId) => {
-    const receivedSessionId = normalizeMediaSessionId(callSessions.detail("screenIn", peerId, call)?.screenSessionId);
-    const announcedSessionId = normalizeMediaSessionId(state.activeScreens.get(peerId)?.screenSessionId);
-    if (!state.inVoice || !activeIds.has(peerId) || !state.activeScreens.has(peerId) || (receivedSessionId && announcedSessionId && receivedSessionId !== announcedSessionId)) {
+    // A oferta pode chegar antes do evento "AO VIVO" do Cloudflare.
+    // Só encerramos se realmente saímos da call ou o membro deixou a call.
+    if (!state.inVoice || !activeIds.has(peerId)) {
       callSessions.close("screenIn", peerId);
       clearScreenStage(peerId);
     }
@@ -6168,6 +6215,22 @@ function reconcileScreenCalls() {
     const call = state.peer.call(member.peerId, state.screenStream, { metadata: { kind: "screen", protocolVersion: CALL_PROTOCOL_VERSION, screenSessionId: callSessions.sessionId("screen"), sharerName: state.nickname, clientId: state.clientId, quality: profile.quality, fps: profile.fps } });
     if (!call) return;
     callSessions.adopt("screenOut", member.peerId, call, { screenSessionId: callSessions.sessionId("screen") });
+    const pc = call?.peerConnection || call?._pc;
+    if (pc && !pc._resenhazinhaStateWatch) {
+      pc._resenhazinhaStateWatch = true;
+      const reportState = () => {
+        console.info("[Resenhazinha WebRTC]", {
+          kind: "screen",
+          peerId: member.peerId,
+          connectionState: pc.connectionState,
+          iceConnectionState: pc.iceConnectionState,
+          iceGatheringState: pc.iceGatheringState,
+          signalingState: pc.signalingState,
+        });
+      };
+      pc.addEventListener?.("connectionstatechange", reportState);
+      pc.addEventListener?.("iceconnectionstatechange", reportState);
+    }
     tuneScreenCall(call);
     const markDropped = () => handleOutgoingScreenDropped(member.peerId, call);
     call.on("close", markDropped);
