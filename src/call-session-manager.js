@@ -20,6 +20,15 @@ export function shouldInitiateVoiceCall(localPeerId, remotePeerId) {
   return Boolean(local && remote && local !== remote && local.localeCompare(remote) < 0);
 }
 
+function normalizedVoiceRevision(value) {
+  const revision = Number(value);
+  return Number.isFinite(revision) && revision >= 0 ? Math.floor(revision) : 0;
+}
+
+export function shouldApplyVoicePresenceSnapshot(localRevision, incomingRevision) {
+  return normalizedVoiceRevision(incomingRevision) >= normalizedVoiceRevision(localRevision);
+}
+
 export function dedupeMembersByIdentity(members) {
   const result = [];
   const indexByIdentity = new Map();
