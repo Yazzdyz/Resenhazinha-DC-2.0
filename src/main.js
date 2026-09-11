@@ -7,6 +7,10 @@ import {
   sanitizeCloudOwnerKey,
 } from "./cloud-control.js";
 import {
+  CloudRtcManager,
+  shouldInitiateCloudRtc,
+} from "./cloud-rtc.js";
+import {
   CALL_PROTOCOL_VERSION,
   CallSessionManager,
   dedupeMembersByIdentity,
@@ -86,6 +90,7 @@ const state = {
   mediaReconcileTimers: new Set(),
   peerReconnectTimer: null,
   peerReconnectAttempts: 0,
+  cloudRtcStates: new Map(),
   members: [],
   voiceCalls: callSessions.map("voice"),
   voiceStats: new Map(),
@@ -190,6 +195,69 @@ const state = {
   guestDisconnectTimers: new Map(),
   server: createDefaultServer(),
 };
+
+const cloudRtc = new CloudRtcManager({
+  sendSignal: ({ targetClientId, targetPeerId, kind, data }) => {
+    if (!state.hostConnection?.open) return;
+    state.hostConnection.send({
+      type: "signal",
+      targetClientId,
+      targetPeerId,
+      kind,
+      data,
+    });
+  },
+  getVoiceStream: () => state.localStream,
+  getScreenStream: () => state.screenStream,
+  onVoiceStream: (entry, stream) => {
+    const member = state.members.find((item) => item.clientId === entry.clientId);
+    const peerId = member?.peerId || entry.peerId || entry.clientId;
+    void attachCloudRemoteAudio(peerId, stream);
+  },
+  onScreenStream: (entry, stream) => {
+    const member = state.members.find((item) => item.clientId === entry.clientId);
+    const peerId = member?.peerId || entry.peerId || entry.clientId;
+    const announced = state.activeScreens.get(peerId)
+      || [...state.activeScreens.values()].find((item) => item.clientId === entry.clientId)
+      || null;
+
+    if (announced && announced.peerId !== peerId) {
+      state.activeScreens.delete(announced.peerId);
+      state.activeScreens.set(peerId, { ...announced, peerId });
+    }
+
+    const current = state.activeScreens.get(peerId);
+    const name = current?.name || member?.name || entry.name || "Um amigo";
+    const screenSessionId = current?.screenSessionId || entry.screenSessionId || "";
+
+    state.activeScreens.set(peerId, {
+      peerId,
+      clientId: entry.clientId,
+      name,
+      screenSessionId,
+    });
+    state.activeScreen = state.activeScreens.values().next().value || null;
+
+    showScreenStage(stream, name, false, {
+      peerId,
+      screenSessionId,
+    });
+    renderMembers();
+    renderScreenStage();
+  },
+  onState: (detail) => {
+    const key = `${detail.kind}:${detail.clientId}`;
+    state.cloudRtcStates.set(key, { ...detail, updatedAt: Date.now() });
+    console.info("[Resenhazinha CloudRTC]", detail);
+  },
+  onNeedsReconcile: (kind) => {
+    window.setTimeout(() => {
+      if (!state.roomEntered || !state.inVoice) return;
+      if (kind === "voice") reconcileVoiceCalls();
+      if (kind === "screen") reconcileScreenCalls();
+    }, 900);
+  },
+});
 
 document.addEventListener("pointerdown", unlockUiAudio, { capture: true });
 document.addEventListener("keydown", unlockUiAudio, { capture: true });
@@ -1397,6 +1465,8 @@ function applyCloudVoicePresence(message) {
   }
 
   if (!member.inVoice) {
+    cloudRtc.close("voice", clientId, { notify: false, reason: "voice-left" });
+    cloudRtc.close("screen", clientId, { notify: false, reason: "voice-left" });
     closeCallsForPeer(peerId);
     if (previousPeerId && previousPeerId !== peerId) closeCallsForPeer(previousPeerId);
   }
@@ -1420,11 +1490,13 @@ function applyCloudScreenPresence(message) {
     const screenSessionId = normalizeMediaSessionId(message.screenSessionId);
     state.activeScreens.set(peerId, {
       peerId,
+      clientId,
       name: cleanNickname(message.name || member?.name || "Amigo") || "Amigo",
       screenSessionId,
     });
   } else {
     state.activeScreens.delete(peerId);
+    cloudRtc.close("screen", clientId, { notify: false, reason: "screen-stopped" });
     clearScreenStage(peerId);
   }
 
@@ -2441,6 +2513,11 @@ function handleHostMessage(message) {
   if (!message || typeof message !== "object") return;
   if (message.type === "heartbeat-ack") return;
 
+  if (message.type === "signal") {
+    void cloudRtc.handleSignal(message);
+    return;
+  }
+
   if (message.type === "voice-presence") {
     applyCloudVoicePresence(message);
     return;
@@ -2485,8 +2562,7 @@ function handleHostMessage(message) {
       openRoomView();
       renderChatHistory();
     }
-    setConnectionState(peerSignalingReady() ? "Nuvem conectada · mídia pronta" : "Nuvem conectada · preparando mídia…", peerSignalingReady() ? "ok" : "warning");
-    ensurePeerSignaling("cloud-ready");
+    setConnectionState("Nuvem conectada · mídia via Cloudflare", "ok");
     unlockUiAudio();
     if (state.hostConnection?.open) {
       state.hostConnection.send({ type: "profile-media-request-all" });
@@ -3096,8 +3172,11 @@ function closeDiagnostics() {
 
 function diagnosticsStatusLabel() {
   if (!state.hostConnection?.open) return "Reconectando ao Cloudflare";
-  if (!peerSignalingReady()) return "Cloudflare conectado · PeerJS reconectando";
-  return "Cloudflare conectado · mídia pronta";
+  const active = cloudRtc.list("voice").some((entry) => entry.pc.connectionState === "connected");
+  if (state.inVoice && !active && state.members.some((member) => member.inVoice && member.clientId !== state.clientId)) {
+    return "Cloudflare conectado · negociando WebRTC";
+  }
+  return "Cloudflare conectado · WebRTC nativo";
 }
 
 async function refreshDiagnostics() {
@@ -4827,7 +4906,6 @@ async function joinVoiceChannel() {
     toast("Não consegui acessar o microfone. Libere a permissão para entrar na call.", "error");
     return;
   }
-  ensurePeerSignaling("join-voice");
   callSessions.beginSession("voice");
   state.voicePresenceRevision = normalizeVoicePresenceRevision(state.voicePresenceRevision) + 1;
   state.inVoice = true; state.voiceJoinedAt = Date.now(); state.resumeVoiceAfterReconnect = false;
@@ -4856,6 +4934,8 @@ function leaveVoiceChannel(options = {}) {
   state.voiceJoinedAt = null;
   callSessions.endSession("voice");
   callSessions.endSession("screen");
+  cloudRtc.closeAll("voice", { notify: true, reason: "voice-leave" });
+  cloudRtc.closeAll("screen", { notify: true, reason: "voice-leave" });
   applyLocalAudioState();
   [...state.voiceCalls.keys()].forEach((peerId) => callSessions.close("voice", peerId));
   [...state.screenCallsIn.keys()].forEach((peerId) => callSessions.close("screenIn", peerId));
@@ -5162,34 +5242,26 @@ function renderMembers() {
 }
 
 function reconcileVoiceCalls() {
-  if (!state.localStream) return;
-  if (!peerSignalingReady()) {
-    ensurePeerSignaling("voice-reconcile");
-    return;
-  }
-  const activeIds = new Set(state.members.filter((member) => member.inVoice).map((member) => member.peerId));
-  state.voiceCalls.forEach((call, peerId) => {
-    if (!activeIds.has(peerId)) {
-      callSessions.cancelRetries("voice", peerId);
-      callSessions.close("voice", peerId);
-      removeRemoteAudio(peerId, call);
-    }
-  });
-  if (!state.inVoice) return;
-  state.members.forEach((member) => {
-    if (!member.inVoice || member.peerId === state.peer.id || state.voiceCalls.has(member.peerId)) return;
-    if (!shouldInitiateVoiceCall(state.peer.id, member.peerId)) return;
-    const call = state.peer.call(member.peerId, state.localStream, {
-      metadata: {
-        kind: "voice",
-        protocolVersion: CALL_PROTOCOL_VERSION,
-        voiceSessionId: callSessions.sessionId("voice"),
-        voicePresenceRevision: normalizeVoicePresenceRevision(state.voicePresenceRevision),
-        clientId: state.clientId,
-        nickname: state.nickname,
-      },
+  const activeMembers = state.members.filter((member) =>
+    member.inVoice
+    && !member.offlineSnapshot
+    && member.clientId
+    && member.clientId !== state.clientId
+  );
+  const activeClientIds = new Set(activeMembers.map((member) => member.clientId));
+  cloudRtc.closeMissing("voice", activeClientIds);
+
+  if (!state.inVoice || !state.localStream || !state.hostConnection?.open) return;
+
+  activeMembers.forEach((member) => {
+    if (!shouldInitiateCloudRtc(state.clientId, member.clientId)) return;
+    void cloudRtc.ensureOffer("voice", {
+      clientId: member.clientId,
+      peerId: member.peerId,
+      name: member.name,
+      voiceSessionId: member.voiceSessionId,
+      localVoiceSessionId: callSessions.sessionId("voice"),
     });
-    if (call) registerVoiceCall(call, { direction: "outbound" });
   });
 }
 
@@ -5306,6 +5378,10 @@ function refreshMemberPeerForCall(call) {
 
 function handleIncomingCall(call) {
   const kind = String(call.metadata?.kind || "voice");
+  if (!kind.startsWith("camera")) {
+    try { call.close(); } catch (_error) {}
+    return;
+  }
   const member = refreshMemberPeerForCall(call);
 
   // Regra simples e confiável: a oferta veio de um membro conhecido do servidor
@@ -5625,6 +5701,52 @@ async function attachRemoteAudio(peerId, stream, ownerCall) {
     audio.play().catch(() => undefined);
   }
   startSpeakingDetector(peerId, stream);
+}
+
+async function attachCloudRemoteAudio(peerId, stream) {
+  const id = String(peerId || "");
+  if (!id || !stream) return;
+
+  removeRemoteAudio(id);
+
+  const audio = document.createElement("audio");
+  audio.id = `audio-${safeId(id)}`;
+  audio.autoplay = true;
+  audio.dataset.voicePeerId = id;
+  audio.muted = state.deafened;
+  elements.audioContainer.append(audio);
+
+  try {
+    const context = await ensurePlaybackAudioContext();
+    if (context) {
+      const source = context.createMediaStreamSource(stream);
+      const gain = context.createGain();
+      const destination = context.createMediaStreamDestination();
+      source.connect(gain).connect(destination);
+      audio.srcObject = destination.stream;
+      state.memberAudioNodes.set(id, {
+        source,
+        gain,
+        destination,
+        audio,
+        stream,
+        ownerCall: null,
+        cloudRtc: true,
+      });
+    } else {
+      audio.srcObject = stream;
+    }
+
+    updateMemberPlaybackGain(id);
+    await applyOutputDevice(audio);
+    await audio.play().catch(() => undefined);
+  } catch (_error) {
+    audio.srcObject = stream;
+    audio.volume = Math.min(1, getMemberVolume(id) * state.outputVolume);
+    audio.play().catch(() => undefined);
+  }
+
+  startSpeakingDetector(id, stream);
 }
 
 function removeRemoteAudio(peerId, ownerCall = null) {
@@ -6140,7 +6262,6 @@ async function captureDisplayMedia(includeAudio) {
 }
 
 function beginScreenShare(stream) {
-  ensurePeerSignaling("begin-screen-share");
   const screenSessionId = callSessions.beginSession("screen");
   state.screenStream = stream;
   const videoTrack = stream.getVideoTracks()[0];
@@ -6189,55 +6310,27 @@ function tuneScreenCall(call) {
 }
 
 function reconcileScreenCalls() {
-  const activeIds = new Set(state.members.filter((member) => member.inVoice).map((member) => member.peerId));
-  state.screenCallsIn.forEach((call, peerId) => {
-    // A oferta pode chegar antes do evento "AO VIVO" do Cloudflare.
-    // Só encerramos se realmente saímos da call ou o membro deixou a call.
-    if (!state.inVoice || !activeIds.has(peerId)) {
-      callSessions.close("screenIn", peerId);
-      clearScreenStage(peerId);
-    }
-  });
-  if (!state.screenStream || !state.inVoice) return;
-  if (!peerSignalingReady()) {
-    ensurePeerSignaling("screen-reconcile");
-    return;
-  }
-  state.screenCallsOut.forEach((call, peerId) => {
-    if (!activeIds.has(peerId)) {
-      callSessions.cancelRetries("screen", peerId);
-      callSessions.close("screenOut", peerId);
-    }
-  });
+  const activeMembers = state.members.filter((member) =>
+    member.inVoice
+    && !member.offlineSnapshot
+    && member.clientId
+    && member.clientId !== state.clientId
+  );
+  const activeClientIds = new Set(activeMembers.map((member) => member.clientId));
+  cloudRtc.closeMissing("screen", activeClientIds);
+
+  if (!state.screenStream || !state.inVoice || !state.hostConnection?.open) return;
+
   const profile = shareProfile();
-  state.members.forEach((member) => {
-    if (!member.inVoice || member.peerId === state.peer.id || state.screenCallsOut.has(member.peerId)) return;
-    const call = state.peer.call(member.peerId, state.screenStream, { metadata: { kind: "screen", protocolVersion: CALL_PROTOCOL_VERSION, screenSessionId: callSessions.sessionId("screen"), sharerName: state.nickname, clientId: state.clientId, quality: profile.quality, fps: profile.fps } });
-    if (!call) return;
-    callSessions.adopt("screenOut", member.peerId, call, { screenSessionId: callSessions.sessionId("screen") });
-    const pc = call?.peerConnection || call?._pc;
-    if (pc && !pc._resenhazinhaStateWatch) {
-      pc._resenhazinhaStateWatch = true;
-      const reportState = () => {
-        console.info("[Resenhazinha WebRTC]", {
-          kind: "screen",
-          peerId: member.peerId,
-          connectionState: pc.connectionState,
-          iceConnectionState: pc.iceConnectionState,
-          iceGatheringState: pc.iceGatheringState,
-          signalingState: pc.signalingState,
-        });
-      };
-      pc.addEventListener?.("connectionstatechange", reportState);
-      pc.addEventListener?.("iceconnectionstatechange", reportState);
-    }
-    tuneScreenCall(call);
-    const markDropped = () => handleOutgoingScreenDropped(member.peerId, call);
-    call.on("close", markDropped);
-    call.on("error", markDropped);
-    window.setTimeout(() => {
-      if (callSessions.isCurrent("screenOut", member.peerId, call)) callSessions.markHealthy("screen", member.peerId);
-    }, 5000);
+  activeMembers.forEach((member) => {
+    void cloudRtc.ensureOffer("screen", {
+      clientId: member.clientId,
+      peerId: member.peerId,
+      name: member.name,
+      screenSessionId: callSessions.sessionId("screen"),
+      quality: profile.quality,
+      fps: profile.fps,
+    });
   });
 }
 
@@ -6261,6 +6354,7 @@ function stopScreenShare() {
   state.screenStream = null;
   const screenSessionId = callSessions.sessionId("screen");
   callSessions.endSession("screen");
+  cloudRtc.closeAll("screen", { notify: true, reason: "screen-stop" });
   stream.getTracks().forEach((track) => track.stop());
   stopFilteredAudioCapture();
   [...state.screenCallsOut.keys()].forEach((peerId) => callSessions.close("screenOut", peerId));
@@ -6465,6 +6559,11 @@ function clearScreenStage(peerId) {
 
 
 function closeCallsForPeer(peerId) {
+  const member = state.members.find((item) => item.peerId === peerId);
+  if (member?.clientId) {
+    cloudRtc.close("voice", member.clientId, { notify: false, reason: "peer-close" });
+    cloudRtc.close("screen", member.clientId, { notify: false, reason: "peer-close" });
+  }
   state.voiceStats.delete(peerId);
   callSessions.closePeer(peerId);
   clearCameraStream(peerId);
@@ -6473,6 +6572,8 @@ function closeCallsForPeer(peerId) {
 }
 
 function closeAllMediaCalls() {
+  cloudRtc.closeAll(null, { notify: true, reason: "media-close-all" });
+  state.cloudRtcStates.clear();
   callSessions.endSession("voice");
   callSessions.endSession("screen");
   callSessions.endSession("camera");
@@ -6497,6 +6598,8 @@ function cleanupMedia() {
   state.activeScreens.clear();
   state.screenStreams.clear();
   state.cameraStreams.clear();
+  cloudRtc.closeAll(null, { notify: false, reason: "cleanup" });
+  state.cloudRtcStates.clear();
   callSessions.closeAll();
   state.screenAudioSettings.clear();
   state.memberAudioNodes.forEach((_node, peerId) => disposeMemberAudioNode(peerId));
