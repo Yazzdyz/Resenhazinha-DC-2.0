@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   CallSessionManager,
   dedupeMembersByIdentity,
+  shouldApplyVoicePresenceSnapshot,
   shouldInitiateVoiceCall,
 } from "../src/call-session-manager.js";
 
@@ -15,6 +16,13 @@ test("apenas um lado inicia a voz", () => {
   assert.equal(shouldInitiateVoiceCall("b", "a"), false);
   assert.equal(shouldInitiateVoiceCall("a", "a"), false);
 });
+
+test("roster antigo não sobrescreve uma entrada de voz mais nova", () => {
+  assert.equal(shouldApplyVoicePresenceSnapshot(3, 2), false);
+  assert.equal(shouldApplyVoicePresenceSnapshot(3, 3), true);
+  assert.equal(shouldApplyVoicePresenceSnapshot(3, 4), true);
+});
+
 
 test("deduplica a mesma instalação e prefere a sessão online mais nova", () => {
   const result = dedupeMembersByIdentity([
