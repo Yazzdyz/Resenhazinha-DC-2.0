@@ -1,3 +1,12 @@
+# v5.1.1
+
+- Corrige o bug visual que escondia o botão GIF atrás do botão de enviar.
+- Adiciona botão de emoji funcional ao lado do GIF no compositor do chat.
+- Adiciona seletor de emojis com categorias e recentes.
+- Refaz o popout compacto de perfil para ficar mais próximo do Discord.
+- Clicar no avatar ou nome do popout agora abre um perfil completo centralizado.
+- Perfil completo mostra banner, avatar, status, cargos, servidor e atividade atual.
+
 # v5.1.0
 
 - Captura de áudio contínua do Windows: novos aplicativos entram no compartilhamento sem reiniciar a transmissão.

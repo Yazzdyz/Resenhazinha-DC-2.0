@@ -112,6 +112,7 @@ const state = {
   pendingReplyMessageId: null,
   contextMessageId: null,
   profilePopoverPeerId: null,
+  profileDialogPeerId: null,
   pendingDeleteMessageId: null,
   localStream: null,
   rawMicrophoneStream: null,
@@ -270,6 +271,31 @@ const $ = (selector) => document.querySelector(selector);
 let gifSearchTimer = null;
 let gifSearchSequence = 0;
 let screenHoverPreviewCloseTimer = null;
+let emojiCategory = "recent";
+
+const EMOJI_CATEGORIES = {
+  recent: { label: "Recentes", icon: "🕘", emojis: [] },
+  faces: { label: "Carinhas", icon: "😀", emojis: ["😀","😃","😄","😁","😆","😅","😂","🤣","😊","😇","🙂","🙃","😉","😍","🥰","😘","😋","😛","😜","🤪","🤨","🧐","🤓","😎","🥳","😏","😒","😞","😔","😟","😕","🙁","☹️","😣","😖","😫","😩","🥺","😢","😭","😤","😠","😡","🤬","🤯","😳","🥵","🥶","😱","😨","😰","😥","😓","🤗","🤔","🫡","🤭","🫢","🤫","🤥","😶","😐","😑","😬","🙄","😯","😲","🥱","😴","🤤","😪","😵","🤐","🤢","🤮","🤧","😷","🤒","🤕"] },
+  gestures: { label: "Gestos", icon: "👍", emojis: ["👍","👎","👌","🤌","🤏","✌️","🤞","🫰","🤟","🤘","🤙","👈","👉","👆","👇","☝️","✋","🤚","🖐️","🖖","👋","🤝","👏","🙌","🫶","🙏","💪","🫵","✍️","🤳"] },
+  hearts: { label: "Corações", icon: "❤️", emojis: ["❤️","🩷","🧡","💛","💚","💙","🩵","💜","🖤","🩶","🤍","🤎","💔","❤️‍🔥","❤️‍🩹","💕","💞","💓","💗","💖","💘","💝","💟","❣️","💋","💯","🔥","✨","⭐","🌟"] },
+  animals: { label: "Animais", icon: "🐱", emojis: ["🐶","🐱","🐭","🐹","🐰","🦊","🐻","🐼","🐻‍❄️","🐨","🐯","🦁","🐮","🐷","🐸","🐵","🙈","🙉","🙊","🐔","🐧","🐦","🐤","🦄","🐝","🦋","🐌","🐞","🐢","🐍","🦎","🐙","🦑","🦀","🐟","🐬","🐳","🦈"] },
+  food: { label: "Comida", icon: "🍕", emojis: ["🍏","🍎","🍐","🍊","🍋","🍌","🍉","🍇","🍓","🫐","🍒","🍑","🥭","🍍","🥥","🥝","🍅","🥑","🍆","🥔","🥕","🌽","🌶️","🍄","🍞","🥐","🥨","🧀","🍔","🍟","🍕","🌭","🥪","🌮","🌯","🍝","🍜","🍣","🍦","🍩","🍪","🎂","☕","🥤"] },
+  activities: { label: "Atividades", icon: "🎮", emojis: ["⚽","🏀","🏈","⚾","🎾","🏐","🎱","🏓","🏸","🥊","🎮","🕹️","🎲","♟️","🎯","🎳","🎸","🎹","🎧","🎤","🎬","🎨","🏆","🥇","🎉","🎊","🎁","🎈"] },
+};
+
+function loadRecentEmojis() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem("resenhazinha:recent-emojis") || "[]");
+    return Array.isArray(parsed) ? parsed.filter((item) => typeof item === "string").slice(0, 32) : [];
+  } catch (_error) {
+    return [];
+  }
+}
+
+function rememberEmoji(emoji) {
+  const recent = [emoji, ...loadRecentEmojis().filter((item) => item !== emoji)].slice(0, 32);
+  try { localStorage.setItem("resenhazinha:recent-emojis", JSON.stringify(recent)); } catch (_error) {}
+}
 
 const elements = {
   personalAppBackgroundMedia: $("#personal-app-background-media"),
@@ -299,6 +325,7 @@ const elements = {
   chatForm: $("#chat-form"), chatInput: $("#chat-input"), sendChatButton: $("#send-chat-button"), mentionMenu: $("#mention-menu"),
   chatPendingFiles: $("#chat-pending-files"), chatAttachmentButton: $("#chat-attachment-button"), chatFileInput: $("#chat-file-input"),
   chatGifButton: $("#chat-gif-button"), gifPicker: $("#gif-picker"), gifSearchInput: $("#gif-search-input"), gifResults: $("#gif-results"), gifPickerStatus: $("#gif-picker-status"),
+  chatEmojiButton: $("#chat-emoji-button"), emojiPicker: $("#emoji-picker"), emojiCategoryTabs: $("#emoji-category-tabs"), emojiResults: $("#emoji-results"),
   serverDialog: $("#server-dialog"), closeServerDialogButton: $("#close-server-dialog-button"), serverNameSettings: $("#server-name-settings"), saveServerNameButton: $("#save-server-name-button"), serverIconPreview: $("#server-icon-preview"), chooseServerIconButton: $("#choose-server-icon-button"), removeServerIconButton: $("#remove-server-icon-button"),
   textChannelSettingRow: $("#text-channel-setting-row"), textChannelSettings: $("#text-channel-settings"), saveTextChannelButton: $("#save-text-channel-button"), deleteTextChannelButton: $("#delete-text-channel-button"), createTextChannelSettingsButton: $("#create-text-channel-settings-button"),
   voiceChannelSettingRow: $("#voice-channel-setting-row"), voiceChannelSettings: $("#voice-channel-settings"), saveVoiceChannelButton: $("#save-voice-channel-button"), deleteVoiceChannelButton: $("#delete-voice-channel-button"), createVoiceChannelSettingsButton: $("#create-voice-channel-settings-button"),
@@ -309,6 +336,7 @@ const elements = {
   serverMuteMemberButton: $("#server-mute-member-button"), disconnectMemberButton: $("#disconnect-member-button"), kickMemberButton: $("#kick-member-button"), memberRoleOptions: $("#member-role-options"),
   voiceContextMenu: $("#voice-context-menu"), voiceContextProfileButton: $("#voice-context-profile-button"), voiceContextMentionButton: $("#voice-context-mention-button"), voiceContextVolumeSection: $("#voice-context-volume-section"), voiceContextVolumeRange: $("#voice-context-volume-range"), voiceContextVolumeValue: $("#voice-context-volume-value"), voiceContextLocalMuteButton: $("#voice-context-local-mute-button"), voiceContextAdminSection: $("#voice-context-admin-section"), voiceContextRolesButton: $("#voice-context-roles-button"), voiceContextServerMuteButton: $("#voice-context-server-mute-button"), voiceContextDisconnectButton: $("#voice-context-disconnect-button"), voiceContextKickButton: $("#voice-context-kick-button"),
   profilePopover: $("#member-profile-popover"), profileBanner: $("#member-profile-banner"), profileAvatar: $("#member-profile-avatar"), profileClose: $("#member-profile-close"), profileName: $("#member-profile-name"), profileOwner: $("#member-profile-owner"), profileStatus: $("#member-profile-status"), profileRoles: $("#member-profile-roles"), profileBioSection: $("#member-profile-bio-section"), profileBioText: $("#member-profile-bio-text"), profileActions: $("#member-profile-actions"), presencePopover: $("#presence-popover"),
+  profileDialog: $("#member-profile-dialog"), profileDialogClose: $("#member-profile-dialog-close"), profileDialogBanner: $("#member-profile-dialog-banner"), profileDialogAvatar: $("#member-profile-dialog-avatar"), profileDialogName: $("#member-profile-dialog-name"), profileDialogOwner: $("#member-profile-dialog-owner"), profileDialogStatus: $("#member-profile-dialog-status"), profileDialogActions: $("#member-profile-dialog-actions"), profileDialogBioSection: $("#member-profile-dialog-bio-section"), profileDialogBio: $("#member-profile-dialog-bio"), profileDialogRoles: $("#member-profile-dialog-roles"), profileDialogServerName: $("#member-profile-dialog-server-name"), profileDialogServerState: $("#member-profile-dialog-server-state"), profileDialogActivityTitle: $("#member-profile-dialog-activity-title"), profileDialogActivityCopy: $("#member-profile-dialog-activity-copy"),
   deleteMessageDialog: $("#delete-message-dialog"), closeDeleteMessageDialogButton: $("#close-delete-message-dialog-button"), deleteMessagePreviewAvatar: $("#delete-message-preview-avatar"), deleteMessagePreviewName: $("#delete-message-preview-name"), deleteMessagePreviewTime: $("#delete-message-preview-time"), deleteMessagePreviewText: $("#delete-message-preview-text"), deleteMessagePreviewAttachments: $("#delete-message-preview-attachments"), cancelDeleteMessageButton: $("#cancel-delete-message-button"), confirmDeleteMessageButton: $("#confirm-delete-message-button"),
 };
 
@@ -444,6 +472,7 @@ elements.chatAttachmentButton.addEventListener("click", () => elements.chatFileI
 elements.chatGifButton?.addEventListener("click", (event) => { event.stopPropagation(); toggleGifPicker(); });
 elements.gifSearchInput?.addEventListener("input", scheduleGifSearch);
 elements.gifSearchInput?.addEventListener("keydown", (event) => { if (event.key === "Escape") { event.preventDefault(); closeGifPicker(); focusChatComposer(); } });
+elements.chatEmojiButton?.addEventListener("click", (event) => { event.stopPropagation(); toggleEmojiPicker(); });
 elements.chatFileInput.addEventListener("change", () => setPendingChatFiles([...elements.chatFileInput.files]));
 elements.chatInput.addEventListener("input", () => { resizeChatInput(); updateMentionMenu(); });
 elements.chatInput.addEventListener("click", updateMentionMenu);
@@ -471,6 +500,11 @@ elements.voiceContextServerMuteButton.addEventListener("click", toggleVoiceConte
 elements.voiceContextDisconnectButton.addEventListener("click", disconnectVoiceContextMember);
 elements.voiceContextKickButton.addEventListener("click", kickVoiceContextMember);
 elements.profileClose.addEventListener("click", closeMemberProfile);
+elements.profileAvatar.addEventListener("click", () => openFullMemberProfile(state.profilePopoverPeerId));
+elements.profileName.addEventListener("click", () => openFullMemberProfile(state.profilePopoverPeerId));
+elements.profilePopover.querySelectorAll(".member-profile-expand-hint").forEach((button) => button.addEventListener("click", () => openFullMemberProfile(state.profilePopoverPeerId)));
+elements.profileDialogClose.addEventListener("click", closeFullMemberProfile);
+elements.profileDialog.addEventListener("click", (event) => { if (event.target === elements.profileDialog) closeFullMemberProfile(); });
 elements.closeDeleteMessageDialogButton.addEventListener("click", closeDeleteMessageDialog);
 elements.cancelDeleteMessageButton.addEventListener("click", closeDeleteMessageDialog);
 elements.confirmDeleteMessageButton.addEventListener("click", confirmDeleteMessage);
@@ -481,23 +515,27 @@ elements.selfName.closest(".sidebar-user-copy")?.addEventListener("click", (even
 elements.selfName.closest(".sidebar-user-copy")?.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") openMemberProfile(state.peer?.id, event.currentTarget); });
 document.addEventListener("pointerdown", (event) => {
   const insideGifPicker = elements.gifPicker?.contains(event.target) || elements.chatGifButton?.contains(event.target);
+  const insideEmojiPicker = elements.emojiPicker?.contains(event.target) || elements.chatEmojiButton?.contains(event.target);
   const insideProfile = elements.profilePopover?.contains(event.target);
   const insidePresence = elements.presencePopover?.contains(event.target);
   const insideVoiceContext = elements.voiceContextMenu?.contains(event.target);
   const profileTrigger = event.target.closest?.("[data-profile-peer]");
   if (!elements.gifPicker?.hidden && !insideGifPicker) closeGifPicker();
+  if (!elements.emojiPicker?.hidden && !insideEmojiPicker) closeEmojiPicker();
   if (!elements.voiceContextMenu.hidden && !insideVoiceContext) closeVoiceContextMenu();
   if (!elements.presencePopover.hidden && !insidePresence && !insideProfile) closePresencePopover();
   if (!elements.profilePopover.hidden && !insideProfile && !insidePresence && !profileTrigger) closeMemberProfile();
 });
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && !elements.gifPicker?.hidden) { closeGifPicker(); focusChatComposer(); return; }
+  if (event.key === "Escape" && !elements.emojiPicker?.hidden) { closeEmojiPicker(); focusChatComposer(); return; }
+  if (event.key === "Escape" && elements.profileDialog?.open) { closeFullMemberProfile(); return; }
   if (event.key === "Escape" && elements.deleteMessageDialog.open) { closeDeleteMessageDialog(); return; }
   if (event.key === "Escape" && !elements.voiceContextMenu.hidden) { closeVoiceContextMenu(); return; }
   if (event.key === "Escape" && !elements.presencePopover.hidden) { closePresencePopover(); return; }
   if (event.key === "Escape" && !elements.profilePopover.hidden) closeMemberProfile();
 });
-window.addEventListener("resize", () => { closeVoiceContextMenu(); closePresencePopover(); closeMemberProfile(); closeGifPicker(); closeScreenHoverPreview(); });
+window.addEventListener("resize", () => { closeVoiceContextMenu(); closePresencePopover(); closeMemberProfile(); closeGifPicker(); closeEmojiPicker(); closeScreenHoverPreview(); });
 document.addEventListener("scroll", () => closeVoiceContextMenu(), true);
 
 window.addEventListener("focus", () => { if (state.currentView === "text") { state.unreadMessages = 0; state.unreadMentions = 0; updateChatVisibility(); } });
@@ -3612,14 +3650,13 @@ function openMemberProfile(peerId, anchor, fallbackMessage = null) {
 function renderMemberProfilePopover(member) {
   paintAvatar(elements.profileAvatar, member.name, member.avatar);
   elements.profileName.textContent = member.peerId === state.peer?.id ? `${member.name} (você)` : member.name;
+  elements.profileAvatar.title = "Abrir perfil completo";
+  elements.profileName.title = "Abrir perfil completo";
   const owner = Boolean((member.clientId && member.clientId === state.server.ownerClientId) || isServerOwner(member.peerId));
   elements.profileOwner.hidden = !owner;
   const presence = normalizePresence(member.presence);
-  const basePresence = presenceLabel(presence);
   elements.profileStatus.dataset.presence = presence;
-  elements.profileStatus.textContent = member.inVoice
-    ? member.serverMuted ? `${basePresence} · na call · mutado pelo servidor` : member.muted ? `${basePresence} · na call · microfone desligado` : `${basePresence} · na call · ${state.server.voiceChannel.name}`
-    : `${basePresence} · fora da call`;
+  elements.profileStatus.textContent = profileStatusText(member);
   const displayRole = memberVisualRole(member);
   const accent = displayRole?.color || "#6f6b9b";
   elements.profilePopover.style.setProperty("--profile-accent", accent);
@@ -3627,17 +3664,7 @@ function renderMemberProfilePopover(member) {
   const bio = cleanBio(member.bio || "");
   elements.profileBioSection.hidden = !bio;
   elements.profileBioText.textContent = bio;
-  elements.profileRoles.replaceChildren();
-  const roleIds = normalizeRoleIds(member.roleIds);
-  const roles = roleIds.map((id) => state.server.roles.find((role) => role.id === id)).filter(Boolean);
-  if (!roles.length) {
-    const empty = document.createElement("span"); empty.className = "member-profile-no-roles"; empty.textContent = "Nenhum cargo"; elements.profileRoles.append(empty);
-  } else {
-    roles.forEach((role) => {
-      const badge = document.createElement("span"); badge.className = "member-profile-role"; badge.style.setProperty("--role-color", role.color);
-      const dot = document.createElement("i"); const text = document.createElement("span"); text.textContent = role.admin ? `${role.name} · ADM` : role.name; badge.append(dot, text); elements.profileRoles.append(badge);
-    });
-  }
+  renderProfileRoles(elements.profileRoles, member);
   elements.profileActions.replaceChildren();
   const isSelf = member.peerId === state.peer?.id;
   if (isSelf) {
@@ -3654,15 +3681,7 @@ function renderMemberProfilePopover(member) {
     message.type = "button";
     message.className = "member-profile-action member-profile-action--message";
     message.innerHTML = '<span class="member-profile-action-icon">●</span><span>Mensagem</span>';
-    message.addEventListener("click", () => {
-      closeMemberProfile();
-      switchView("text");
-      const mention = `@${member.name} `;
-      elements.chatInput.value = mention;
-      resizeChatInput();
-      focusChatComposer();
-      try { elements.chatInput.setSelectionRange(mention.length, mention.length); } catch (_error) {}
-    });
+    message.addEventListener("click", () => startMessageToMember(member));
 
     const manage = document.createElement("button");
     manage.type = "button";
@@ -3690,6 +3709,139 @@ function renderMemberProfilePopover(member) {
     });
 
     elements.profileActions.append(message, manage, more);
+  }
+}
+
+function profileMemberByPeerId(peerId) {
+  const id = String(peerId || "");
+  if (!id) return null;
+  const live = state.members.find((item) => item.peerId === id);
+  if (live) return live;
+  const clientId = clientIdForPeer(id);
+  const record = clientId ? state.memberRegistry.get(clientId) : null;
+  return record ? registryOfflineMember(record) : null;
+}
+
+function startMessageToMember(member) {
+  if (!member) return;
+  closeMemberProfile();
+  closeFullMemberProfile();
+  switchView("text");
+  const mention = `@${member.name} `;
+  elements.chatInput.value = mention;
+  resizeChatInput();
+  focusChatComposer();
+  try { elements.chatInput.setSelectionRange(mention.length, mention.length); } catch (_error) {}
+}
+
+function profileStatusText(member) {
+  const presence = normalizePresence(member?.presence);
+  const basePresence = presenceLabel(presence);
+  if (!member?.inVoice) return `${basePresence} · fora da call`;
+  if (member.serverMuted) return `${basePresence} · na call · mutado pelo servidor`;
+  if (member.muted) return `${basePresence} · na call · microfone desligado`;
+  return `${basePresence} · na call · ${state.server.voiceChannel.name}`;
+}
+
+function renderProfileRoles(container, member, emptyLabel = "Nenhum cargo") {
+  container.replaceChildren();
+  const roleIds = normalizeRoleIds(member?.roleIds);
+  const roles = roleIds.map((id) => state.server.roles.find((role) => role.id === id)).filter(Boolean);
+  if (!roles.length) {
+    const empty = document.createElement("span");
+    empty.className = "member-profile-no-roles";
+    empty.textContent = emptyLabel;
+    container.append(empty);
+    return;
+  }
+  roles.forEach((role) => {
+    const badge = document.createElement("span");
+    badge.className = "member-profile-role";
+    badge.style.setProperty("--role-color", role.color);
+    const dot = document.createElement("i");
+    const text = document.createElement("span");
+    text.textContent = role.admin ? `${role.name} · ADM` : role.name;
+    badge.append(dot, text);
+    container.append(badge);
+  });
+}
+
+function closeFullMemberProfile() {
+  state.profileDialogPeerId = null;
+  if (elements.profileDialog?.open) elements.profileDialog.close();
+}
+
+function openFullMemberProfile(peerId) {
+  const member = profileMemberByPeerId(peerId);
+  if (!member || !elements.profileDialog) return;
+  state.profileDialogPeerId = member.peerId;
+  renderFullMemberProfile(member);
+  closeMemberProfile();
+  if (!elements.profileDialog.open) elements.profileDialog.showModal();
+}
+
+function renderFullMemberProfile(member) {
+  const isSelf = member.peerId === state.peer?.id;
+  const owner = Boolean((member.clientId && member.clientId === state.server.ownerClientId) || isServerOwner(member.peerId));
+  const displayRole = memberVisualRole(member);
+  const accent = displayRole?.color || "#6f6b9b";
+
+  paintAvatar(elements.profileDialogAvatar, member.name, member.avatar);
+  elements.profileDialogName.textContent = isSelf ? `${member.name} (você)` : member.name;
+  elements.profileDialogOwner.hidden = !owner;
+  elements.profileDialogStatus.textContent = profileStatusText(member);
+  elements.profileDialogStatus.dataset.presence = normalizePresence(member.presence);
+  applyBannerSurface(elements.profileDialogBanner, member.banner, accent);
+  elements.profileDialog.style.setProperty("--profile-accent", accent);
+
+  const bio = cleanBio(member.bio || "");
+  elements.profileDialogBioSection.hidden = !bio;
+  elements.profileDialogBio.textContent = bio;
+  renderProfileRoles(elements.profileDialogRoles, member);
+  elements.profileDialogServerName.textContent = state.server?.name || "Resenhazinha";
+  elements.profileDialogServerState.textContent = owner ? "Dono do servidor" : member.inVoice ? "Na call agora" : normalizePresence(member.presence) === "offline" ? "Offline" : "Membro do servidor";
+
+  elements.profileDialogActions.replaceChildren();
+  if (isSelf) {
+    const edit = document.createElement("button");
+    edit.type = "button";
+    edit.className = "member-profile-dialog-message";
+    edit.textContent = "Editar perfil";
+    edit.addEventListener("click", () => {
+      closeFullMemberProfile();
+      openUserSettings();
+    });
+    elements.profileDialogActions.append(edit);
+  } else {
+    const message = document.createElement("button");
+    message.type = "button";
+    message.className = "member-profile-dialog-message";
+    message.textContent = "Mensagem";
+    message.addEventListener("click", () => startMessageToMember(member));
+    elements.profileDialogActions.append(message);
+
+    const manage = document.createElement("button");
+    manage.type = "button";
+    manage.className = "member-profile-dialog-round";
+    manage.title = canCurrentUserAdmin() ? "Gerenciar membro" : "Ajustar volume";
+    manage.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M5 21a7 7 0 0 1 14 0"/><path d="M19 8v6M16 11h6"/></svg>';
+    manage.addEventListener("click", () => {
+      closeFullMemberProfile();
+      openMemberDialog(member.peerId);
+    });
+    elements.profileDialogActions.append(manage);
+  }
+
+  const sharing = state.activeScreens.has(member.peerId);
+  if (sharing) {
+    elements.profileDialogActivityTitle.textContent = "Transmitindo agora";
+    elements.profileDialogActivityCopy.textContent = `${member.name} está compartilhando a tela na call. Feche este perfil e passe o mouse sobre o AO VIVO para ver a prévia.`;
+  } else if (member.inVoice) {
+    elements.profileDialogActivityTitle.textContent = `Na call · ${state.server.voiceChannel.name}`;
+    elements.profileDialogActivityCopy.textContent = member.muted ? "Está na call com o microfone desligado." : "Está na call agora.";
+  } else {
+    elements.profileDialogActivityTitle.textContent = `${member.name} não tem nenhuma atividade para compartilhar aqui`;
+    elements.profileDialogActivityCopy.textContent = "Quando esta pessoa estiver em call ou transmitindo, você verá isso por aqui.";
   }
 }
 
@@ -4079,6 +4231,7 @@ async function sendChatMessage() {
     }
     elements.chatInput.value = "";
     closeGifPicker();
+    closeEmojiPicker();
     state.pendingChatFiles = [];
     clearPendingReply();
     renderPendingChatFiles();
@@ -4877,6 +5030,7 @@ async function loadGifPickerResults(query = "") {
 function toggleGifPicker() {
   if (!elements.gifPicker || !elements.chatGifButton) return;
   const opening = elements.gifPicker.hidden;
+  if (opening) closeEmojiPicker();
   if (!opening) {
     closeGifPicker();
     return;
@@ -4894,6 +5048,84 @@ function scheduleGifSearch() {
   gifSearchTimer = window.setTimeout(() => {
     void loadGifPickerResults(elements.gifSearchInput?.value || "");
   }, 320);
+}
+
+function closeEmojiPicker() {
+  if (!elements.emojiPicker) return;
+  elements.emojiPicker.hidden = true;
+  elements.chatEmojiButton?.classList.remove("is-active");
+}
+
+function emojisForCategory(category) {
+  if (category === "recent") {
+    const recent = loadRecentEmojis();
+    return recent.length ? recent : ["😂","❤️","🔥","😭","👍","💀","🥺","✨","😎","🙏","🤣","💯"];
+  }
+  return EMOJI_CATEGORIES[category]?.emojis || EMOJI_CATEGORIES.faces.emojis;
+}
+
+function renderEmojiPicker() {
+  if (!elements.emojiCategoryTabs || !elements.emojiResults) return;
+  elements.emojiCategoryTabs.replaceChildren();
+  Object.entries(EMOJI_CATEGORIES).forEach(([key, category]) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "emoji-category-button";
+    button.classList.toggle("is-active", key === emojiCategory);
+    button.title = category.label;
+    button.setAttribute("aria-label", category.label);
+    button.textContent = category.icon;
+    button.addEventListener("click", () => {
+      emojiCategory = key;
+      renderEmojiPicker();
+    });
+    elements.emojiCategoryTabs.append(button);
+  });
+
+  elements.emojiResults.replaceChildren();
+  emojisForCategory(emojiCategory).forEach((emoji) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "emoji-result-button";
+    button.textContent = emoji;
+    button.title = emoji;
+    button.addEventListener("click", () => {
+      insertEmojiAtCursor(emoji);
+      rememberEmoji(emoji);
+      emojiCategory = "recent";
+      closeEmojiPicker();
+    });
+    elements.emojiResults.append(button);
+  });
+}
+
+function insertEmojiAtCursor(emoji) {
+  const input = elements.chatInput;
+  if (!input) return;
+  const start = Number.isInteger(input.selectionStart) ? input.selectionStart : input.value.length;
+  const end = Number.isInteger(input.selectionEnd) ? input.selectionEnd : start;
+  const before = input.value.slice(0, start);
+  const after = input.value.slice(end);
+  input.value = `${before}${emoji}${after}`.slice(0, input.maxLength || 500);
+  resizeChatInput();
+  updateMentionMenu();
+  focusChatComposer();
+  const next = Math.min(input.value.length, start + emoji.length);
+  try { input.setSelectionRange(next, next); } catch (_error) {}
+}
+
+function toggleEmojiPicker() {
+  if (!elements.emojiPicker || !elements.chatEmojiButton) return;
+  const opening = elements.emojiPicker.hidden;
+  if (!opening) {
+    closeEmojiPicker();
+    return;
+  }
+  closeGifPicker();
+  closeMentionMenu();
+  renderEmojiPicker();
+  elements.emojiPicker.hidden = false;
+  elements.chatEmojiButton.classList.add("is-active");
 }
 
 function ensureScreenHoverPreview() {
