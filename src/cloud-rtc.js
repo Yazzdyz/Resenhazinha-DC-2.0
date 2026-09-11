@@ -115,6 +115,8 @@ export class CloudRtcManager {
       closed: false,
       disconnectTimer: null,
       negotiationTimer: null,
+      qualityTimer: null,
+      screenTargetBitrate: null,
       createdAt: Date.now(),
       screenSessionId: cleanId(remote?.screenSessionId),
       voiceSessionId: cleanId(remote?.voiceSessionId),
@@ -139,6 +141,7 @@ export class CloudRtcManager {
         clearTimeout(entry.negotiationTimer);
         entry.disconnectTimer = null;
         entry.negotiationTimer = null;
+        if (entry.kind === "screen") this._startScreenQualityController(entry);
         return;
       }
 
@@ -176,28 +179,100 @@ export class CloudRtcManager {
     return entry;
   }
 
-  _tuneScreenSender(sender) {
-    if (!sender?.track || sender.track.kind !== "video" || !sender.getParameters || !sender.setParameters) return;
+  _screenProfile() {
     const profile = this.getScreenProfile?.() || {};
-    const bitrate = Math.max(1_000_000, Number(profile.bitrate) || 12_000_000);
+    const cap = Math.max(1_500_000, Number(profile.bitrate) || 8_000_000);
     const fps = [15, 30, 60].includes(Number(profile.fps)) ? Number(profile.fps) : 30;
+    const floor = Math.min(cap, fps >= 60 ? 3_000_000 : 2_000_000);
+    return { cap, floor, fps };
+  }
 
-    const apply = () => {
+  _applyScreenSender(sender, bitrate = null) {
+    if (!sender?.track || sender.track.kind !== "video" || !sender.getParameters || !sender.setParameters) return;
+    const profile = this._screenProfile();
+    const target = Math.max(profile.floor, Math.min(profile.cap, Number(bitrate) || profile.cap));
+    try {
+      const parameters = sender.getParameters();
+      if (!parameters.encodings?.length) parameters.encodings = [{}];
+      parameters.encodings[0].maxBitrate = Math.round(target);
+      parameters.encodings[0].maxFramerate = profile.fps;
+      parameters.encodings[0].scaleResolutionDownBy = 1;
+      parameters.encodings[0].priority = "high";
+      parameters.degradationPreference = profile.fps >= 60 ? "maintain-framerate" : "balanced";
+      sender.setParameters(parameters).catch(() => undefined);
+    } catch {}
+  }
+
+  _startScreenQualityController(entry) {
+    if (!entry || entry.kind !== "screen" || entry.closed || entry.qualityTimer) return;
+    const sender = entry.pc.getSenders().find((item) => item.track?.kind === "video");
+    if (!sender) return;
+    const profile = this._screenProfile();
+    entry.screenTargetBitrate = Math.min(profile.cap, Math.max(profile.floor, Math.round(profile.cap * 0.72)));
+    this._applyScreenSender(sender, entry.screenTargetBitrate);
+
+    entry.qualityTimer = setInterval(async () => {
+      if (entry.closed || entry.pc.connectionState === "closed") return;
+      const videoSender = entry.pc.getSenders().find((item) => item.track?.kind === "video");
+      if (!videoSender) return;
+
       try {
-        const parameters = sender.getParameters();
-        if (!parameters.encodings?.length) parameters.encodings = [{}];
-        parameters.encodings[0].maxBitrate = bitrate;
-        parameters.encodings[0].maxFramerate = fps;
-        parameters.encodings[0].scaleResolutionDownBy = 1;
-        parameters.encodings[0].priority = "high";
-        parameters.degradationPreference = fps >= 60 ? "maintain-framerate" : "balanced";
-        sender.setParameters(parameters).catch(() => undefined);
-      } catch {}
-    };
+        const reports = await entry.pc.getStats();
+        let available = null;
+        let rttMs = null;
+        let qualityReason = "";
+        reports.forEach((report) => {
+          if (
+            report.type === "candidate-pair"
+            && report.state === "succeeded"
+            && (report.nominated || report.selected)
+          ) {
+            if (Number.isFinite(report.availableOutgoingBitrate)) available = Number(report.availableOutgoingBitrate);
+            if (Number.isFinite(report.currentRoundTripTime)) rttMs = Number(report.currentRoundTripTime) * 1000;
+          }
+          if (report.type === "outbound-rtp" && report.kind === "video") {
+            qualityReason = String(report.qualityLimitationReason || "");
+          }
+        });
 
-    apply();
-    setTimeout(apply, 800);
-    setTimeout(apply, 2500);
+        const currentProfile = this._screenProfile();
+        let target = entry.screenTargetBitrate || Math.round(currentProfile.cap * 0.72);
+
+        if (Number.isFinite(available) && available > 0) {
+          target = Math.min(currentProfile.cap, Math.max(currentProfile.floor, available * 0.78));
+        } else if (qualityReason === "bandwidth") {
+          target = Math.max(currentProfile.floor, target * 0.82);
+        } else {
+          target = Math.min(currentProfile.cap, target * 1.08);
+        }
+
+        if (Number.isFinite(rttMs)) {
+          if (rttMs >= 320) target *= 0.68;
+          else if (rttMs >= 220) target *= 0.8;
+          else if (rttMs >= 140) target *= 0.9;
+        }
+
+        target = Math.max(currentProfile.floor, Math.min(currentProfile.cap, target));
+        const previous = entry.screenTargetBitrate || target;
+        if (Math.abs(target - previous) / Math.max(previous, 1) >= 0.08) {
+          entry.screenTargetBitrate = Math.round(target);
+          this._applyScreenSender(videoSender, entry.screenTargetBitrate);
+          this._emitState(entry, {
+            phase: "screen-quality",
+            screenBitrate: entry.screenTargetBitrate,
+            availableOutgoingBitrate: Number.isFinite(available) ? Math.round(available) : null,
+            rttMs: Number.isFinite(rttMs) ? Math.round(rttMs) : null,
+            qualityLimitationReason: qualityReason || null,
+          });
+        }
+      } catch {}
+    }, 2200);
+  }
+
+  _tuneScreenSender(sender, entry = null) {
+    this._applyScreenSender(sender, entry?.screenTargetBitrate || null);
+    setTimeout(() => this._applyScreenSender(sender, entry?.screenTargetBitrate || null), 700);
+    setTimeout(() => this._applyScreenSender(sender, entry?.screenTargetBitrate || null), 2200);
   }
 
   _addLocalTracks(entry) {
@@ -207,10 +282,11 @@ export class CloudRtcManager {
     for (const track of stream.getTracks()) {
       if (existingTrackIds.has(track.id)) continue;
       const sender = entry.pc.addTrack(track, stream);
-      if (entry.kind === "screen") this._tuneScreenSender(sender);
+      if (entry.kind === "screen") this._tuneScreenSender(sender, entry);
     }
     if (entry.kind === "screen") {
-      entry.pc.getSenders().forEach((sender) => this._tuneScreenSender(sender));
+      entry.pc.getSenders().forEach((sender) => this._tuneScreenSender(sender, entry));
+      this._startScreenQualityController(entry);
     }
   }
 
@@ -382,8 +458,10 @@ export class CloudRtcManager {
     entry.closed = true;
     clearTimeout(entry.disconnectTimer);
     clearTimeout(entry.negotiationTimer);
+    clearInterval(entry.qualityTimer);
     entry.disconnectTimer = null;
     entry.negotiationTimer = null;
+    entry.qualityTimer = null;
 
     if (notify) {
       try {

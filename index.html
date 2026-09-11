@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; connect-src 'self' https://0.peerjs.com wss://0.peerjs.com https://resenhazinha-server.guilhermekrull1227.workers.dev wss://resenhazinha-server.guilhermekrull1227.workers.dev http://127.0.0.1:* ws://127.0.0.1:*; img-src 'self' data: blob:; media-src 'self' blob: https://www.myinstants.com; style-src 'self' 'unsafe-inline'; script-src 'self';"
+      content="default-src 'self'; connect-src 'self' https://0.peerjs.com wss://0.peerjs.com https://resenhazinha-server.guilhermekrull1227.workers.dev wss://resenhazinha-server.guilhermekrull1227.workers.dev http://127.0.0.1:* ws://127.0.0.1:*; img-src 'self' data: blob: https://media.tenor.com; media-src 'self' blob: https://www.myinstants.com; style-src 'self' 'unsafe-inline'; script-src 'self';"
     />
     <meta name="description" content="Mini servidor com chat, call, cargos e compartilhamento de tela entre amigos." />
     <title>Resenhazinha</title>
@@ -208,12 +208,27 @@
             </div>
             <div class="chat-pending-files" id="chat-pending-files" hidden></div>
             <div class="mention-menu" id="mention-menu" hidden role="listbox" aria-label="Menções"></div>
+            <div class="gif-picker" id="gif-picker" hidden>
+              <div class="gif-picker-head">
+                <strong>GIFs</strong>
+                <span>por Tenor</span>
+              </div>
+              <label class="gif-search-wrap">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
+                <input id="gif-search-input" type="search" maxlength="60" autocomplete="off" placeholder="Pesquisar GIFs" aria-label="Pesquisar GIFs" />
+              </label>
+              <div class="gif-results" id="gif-results" aria-live="polite"></div>
+              <div class="gif-picker-status" id="gif-picker-status">Abra para ver GIFs em destaque.</div>
+            </div>
             <form class="chat-form chat-form--full" id="chat-form">
               <button class="chat-attachment-button" type="button" id="chat-attachment-button" aria-label="Adicionar arquivo" title="Enviar foto, vídeo ou arquivo">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
               </button>
               <input id="chat-file-input" type="file" multiple hidden />
               <textarea id="chat-input" maxlength="500" rows="1" placeholder="Mensagem para #chat-principal" aria-label="Mensagem para o canal"></textarea>
+              <button class="chat-gif-button" type="button" id="chat-gif-button" aria-label="Abrir GIFs" title="GIF">
+                <span>GIF</span>
+              </button>
               <button type="submit" id="send-chat-button" aria-label="Enviar mensagem" title="Enviar mensagem">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4 20-7Z"/><path d="M22 2 11 13"/></svg>
               </button>

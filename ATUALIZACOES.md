@@ -1,3 +1,12 @@
+# v5.1.0
+
+- Captura de áudio contínua do Windows: novos aplicativos entram no compartilhamento sem reiniciar a transmissão.
+- O áudio do próprio Resenhazinha/call continua protegido na rota padrão.
+- Bitrate de tela adaptativo conforme banda disponível, RTT e limitação de rede para reduzir engasgos.
+- Card de perfil compacto e refinado inspirado no Discord, aberto pelo avatar.
+- Preview ao vivo da transmissão ao passar o mouse por quem está compartilhando.
+- Botão GIF no chat com painel de busca e GIFs em alta do Tenor.
+
 # v5.0.0
 
 - Clicar no canal de voz agora entra diretamente na call.

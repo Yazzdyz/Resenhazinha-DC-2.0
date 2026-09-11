@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld("resenhazinhaDesktop", {
     ipcRenderer.invoke("resenhazinha:start-filtered-audio", excludedProcessIds)
   ),
   stopFilteredAudioCapture: () => ipcRenderer.invoke("resenhazinha:stop-filtered-audio"),
+  searchGifs: (query) => ipcRenderer.invoke("resenhazinha:search-gifs", String(query || "")),
   setVoiceActive: (active) => ipcRenderer.send("resenhazinha:voice-active", Boolean(active)),
   onFilteredAudioChunk: (callback) => {
     ipcRenderer.removeAllListeners("resenhazinha:filtered-audio-chunk");

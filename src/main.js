@@ -267,6 +267,10 @@ document.addEventListener("pointerdown", unlockUiAudio, { capture: true });
 document.addEventListener("keydown", unlockUiAudio, { capture: true });
 
 const $ = (selector) => document.querySelector(selector);
+let gifSearchTimer = null;
+let gifSearchSequence = 0;
+let screenHoverPreviewCloseTimer = null;
+
 const elements = {
   personalAppBackgroundMedia: $("#personal-app-background-media"),
   lobbyView: $("#lobby-view"), roomView: $("#room-view"), joinForm: $("#join-form"),
@@ -294,6 +298,7 @@ const elements = {
   chatToggleButton: $("#chat-toggle-button"), chatUnreadBadge: $("#chat-unread-badge"), chatMessages: $("#chat-messages"), chatEmpty: $("#chat-empty"),
   chatForm: $("#chat-form"), chatInput: $("#chat-input"), sendChatButton: $("#send-chat-button"), mentionMenu: $("#mention-menu"),
   chatPendingFiles: $("#chat-pending-files"), chatAttachmentButton: $("#chat-attachment-button"), chatFileInput: $("#chat-file-input"),
+  chatGifButton: $("#chat-gif-button"), gifPicker: $("#gif-picker"), gifSearchInput: $("#gif-search-input"), gifResults: $("#gif-results"), gifPickerStatus: $("#gif-picker-status"),
   serverDialog: $("#server-dialog"), closeServerDialogButton: $("#close-server-dialog-button"), serverNameSettings: $("#server-name-settings"), saveServerNameButton: $("#save-server-name-button"), serverIconPreview: $("#server-icon-preview"), chooseServerIconButton: $("#choose-server-icon-button"), removeServerIconButton: $("#remove-server-icon-button"),
   textChannelSettingRow: $("#text-channel-setting-row"), textChannelSettings: $("#text-channel-settings"), saveTextChannelButton: $("#save-text-channel-button"), deleteTextChannelButton: $("#delete-text-channel-button"), createTextChannelSettingsButton: $("#create-text-channel-settings-button"),
   voiceChannelSettingRow: $("#voice-channel-setting-row"), voiceChannelSettings: $("#voice-channel-settings"), saveVoiceChannelButton: $("#save-voice-channel-button"), deleteVoiceChannelButton: $("#delete-voice-channel-button"), createVoiceChannelSettingsButton: $("#create-voice-channel-settings-button"),
@@ -436,6 +441,9 @@ elements.kickMemberButton.addEventListener("click", kickSelectedMemberFromServer
 elements.chatForm.addEventListener("submit", (event) => { event.preventDefault(); void sendChatMessage(); });
 elements.chatInput.addEventListener("keydown", handleChatInputKeydown);
 elements.chatAttachmentButton.addEventListener("click", () => elements.chatFileInput.click());
+elements.chatGifButton?.addEventListener("click", (event) => { event.stopPropagation(); toggleGifPicker(); });
+elements.gifSearchInput?.addEventListener("input", scheduleGifSearch);
+elements.gifSearchInput?.addEventListener("keydown", (event) => { if (event.key === "Escape") { event.preventDefault(); closeGifPicker(); focusChatComposer(); } });
 elements.chatFileInput.addEventListener("change", () => setPendingChatFiles([...elements.chatFileInput.files]));
 elements.chatInput.addEventListener("input", () => { resizeChatInput(); updateMentionMenu(); });
 elements.chatInput.addEventListener("click", updateMentionMenu);
@@ -472,21 +480,24 @@ elements.selfName.closest(".sidebar-user-copy")?.setAttribute("data-profile-peer
 elements.selfName.closest(".sidebar-user-copy")?.addEventListener("click", (event) => openMemberProfile(state.peer?.id, event.currentTarget));
 elements.selfName.closest(".sidebar-user-copy")?.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") openMemberProfile(state.peer?.id, event.currentTarget); });
 document.addEventListener("pointerdown", (event) => {
+  const insideGifPicker = elements.gifPicker?.contains(event.target) || elements.chatGifButton?.contains(event.target);
   const insideProfile = elements.profilePopover?.contains(event.target);
   const insidePresence = elements.presencePopover?.contains(event.target);
   const insideVoiceContext = elements.voiceContextMenu?.contains(event.target);
   const profileTrigger = event.target.closest?.("[data-profile-peer]");
+  if (!elements.gifPicker?.hidden && !insideGifPicker) closeGifPicker();
   if (!elements.voiceContextMenu.hidden && !insideVoiceContext) closeVoiceContextMenu();
   if (!elements.presencePopover.hidden && !insidePresence && !insideProfile) closePresencePopover();
   if (!elements.profilePopover.hidden && !insideProfile && !insidePresence && !profileTrigger) closeMemberProfile();
 });
 document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !elements.gifPicker?.hidden) { closeGifPicker(); focusChatComposer(); return; }
   if (event.key === "Escape" && elements.deleteMessageDialog.open) { closeDeleteMessageDialog(); return; }
   if (event.key === "Escape" && !elements.voiceContextMenu.hidden) { closeVoiceContextMenu(); return; }
   if (event.key === "Escape" && !elements.presencePopover.hidden) { closePresencePopover(); return; }
   if (event.key === "Escape" && !elements.profilePopover.hidden) closeMemberProfile();
 });
-window.addEventListener("resize", () => { closeVoiceContextMenu(); closePresencePopover(); closeMemberProfile(); });
+window.addEventListener("resize", () => { closeVoiceContextMenu(); closePresencePopover(); closeMemberProfile(); closeGifPicker(); closeScreenHoverPreview(); });
 document.addEventListener("scroll", () => closeVoiceContextMenu(), true);
 
 window.addEventListener("focus", () => { if (state.currentView === "text") { state.unreadMessages = 0; state.unreadMentions = 0; updateChatVisibility(); } });
@@ -3639,7 +3650,46 @@ function renderMemberProfilePopover(member) {
     statusAction.addEventListener("click", (event) => { event.stopPropagation(); openPresencePopover(statusAction); });
     elements.profileActions.append(statusAction);
   } else if (state.members.some((item) => item.peerId === member.peerId)) {
-    const manage = document.createElement("button"); manage.type = "button"; manage.className = "member-profile-action"; manage.textContent = canCurrentUserAdmin() ? "Gerenciar membro" : "Ajustar volume"; manage.addEventListener("click", () => { closeMemberProfile(); openMemberDialog(member.peerId); }); elements.profileActions.append(manage);
+    const message = document.createElement("button");
+    message.type = "button";
+    message.className = "member-profile-action member-profile-action--message";
+    message.innerHTML = '<span class="member-profile-action-icon">●</span><span>Mensagem</span>';
+    message.addEventListener("click", () => {
+      closeMemberProfile();
+      switchView("text");
+      const mention = `@${member.name} `;
+      elements.chatInput.value = mention;
+      resizeChatInput();
+      focusChatComposer();
+      try { elements.chatInput.setSelectionRange(mention.length, mention.length); } catch (_error) {}
+    });
+
+    const manage = document.createElement("button");
+    manage.type = "button";
+    manage.className = "member-profile-action member-profile-action--circle";
+    manage.title = canCurrentUserAdmin() ? "Gerenciar membro" : "Ajustar volume";
+    manage.setAttribute("aria-label", manage.title);
+    manage.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M5 21a7 7 0 0 1 14 0"/><path d="M19 8v6M16 11h6"/></svg>';
+    manage.addEventListener("click", () => { closeMemberProfile(); openMemberDialog(member.peerId); });
+
+    const more = document.createElement("button");
+    more.type = "button";
+    more.className = "member-profile-action member-profile-action--circle";
+    more.title = "Mais opções";
+    more.setAttribute("aria-label", "Mais opções");
+    more.textContent = "•••";
+    more.addEventListener("click", (event) => {
+      const rect = event.currentTarget.getBoundingClientRect();
+      closeMemberProfile();
+      openVoiceContextMenu({
+        preventDefault() {},
+        stopPropagation() {},
+        clientX: rect.left,
+        clientY: rect.bottom + 4,
+      }, member.peerId);
+    });
+
+    elements.profileActions.append(message, manage, more);
   }
 }
 
@@ -4028,6 +4078,7 @@ async function sendChatMessage() {
       await uploadChatMessageToHost(text, outgoing, replyToMessageId);
     }
     elements.chatInput.value = "";
+    closeGifPicker();
     state.pendingChatFiles = [];
     clearPendingReply();
     renderPendingChatFiles();
@@ -4204,6 +4255,7 @@ function applyIncomingChatReaction(payload) {
 function replySnapshotText(message) {
   if (!message) return "Mensagem";
   const text = normalizeChatText(message.text);
+  if (gifUrlFromMessageText(text)) return "GIF";
   if (text) return text.slice(0, 150);
   const attachments = sanitizeChatAttachments(message.attachments);
   if (attachments.length) return `${attachments.length} anexo${attachments.length === 1 ? "" : "s"}`;
@@ -4478,9 +4530,29 @@ function renderChatMessage(message, previousMessage = null) {
   renderMessageReplyReference(content, message);
   if (state.editingMessageId === message.id) content.append(createChatEditBox(message));
   else {
-    const body = document.createElement("p"); body.className = "chat-message-text"; appendMessageTextWithMentions(body, message.text); if (!message.text) body.hidden = true;
-    if (grouped && message.editedAt && message.text) { const edited = document.createElement("span"); edited.className = "chat-edited-label chat-edited-label--inline"; edited.textContent = " (editado)"; body.append(edited); }
-    content.append(body);
+    const gifUrl = gifUrlFromMessageText(message.text);
+    if (gifUrl) {
+      const wrap = document.createElement("div");
+      wrap.className = "chat-gif-embed";
+      const image = document.createElement("img");
+      image.src = gifUrl;
+      image.alt = "GIF enviado";
+      image.loading = "lazy";
+      image.addEventListener("error", () => {
+        wrap.replaceChildren();
+        const fallback = document.createElement("a");
+        fallback.href = gifUrl;
+        fallback.textContent = "Abrir GIF";
+        fallback.target = "_blank";
+        wrap.append(fallback);
+      }, { once: true });
+      wrap.append(image);
+      content.append(wrap);
+    } else {
+      const body = document.createElement("p"); body.className = "chat-message-text"; appendMessageTextWithMentions(body, message.text); if (!message.text) body.hidden = true;
+      if (grouped && message.editedAt && message.text) { const edited = document.createElement("span"); edited.className = "chat-edited-label chat-edited-label--inline"; edited.textContent = " (editado)"; body.append(edited); }
+      content.append(body);
+    }
   }
   renderChatAttachments(content, message);
   renderMessageReactions(content, message);
@@ -4731,6 +4803,175 @@ function sortedVoiceMembers() {
     });
 }
 
+
+function allowedGifUrl(value) {
+  const url = String(value || "").trim();
+  if (!/^https:\/\/media\.tenor\.com\//i.test(url)) return "";
+  if (!/\.(?:gif|webp)(?:\?|$)/i.test(url)) return "";
+  return url.slice(0, 900);
+}
+
+function gifUrlFromMessageText(value) {
+  const text = normalizeChatText(value);
+  return allowedGifUrl(text);
+}
+
+function closeGifPicker() {
+  window.clearTimeout(gifSearchTimer);
+  gifSearchTimer = null;
+  if (elements.gifPicker) elements.gifPicker.hidden = true;
+  elements.chatGifButton?.classList.remove("is-active");
+}
+
+async function loadGifPickerResults(query = "") {
+  if (!elements.gifResults || !elements.gifPickerStatus) return;
+  const requestId = ++gifSearchSequence;
+  elements.gifPickerStatus.hidden = false;
+  elements.gifPickerStatus.textContent = query ? "Procurando GIFs…" : "Carregando GIFs em destaque…";
+  elements.gifResults.replaceChildren();
+
+  try {
+    const response = await window.resenhazinhaDesktop?.searchGifs?.(query);
+    if (requestId !== gifSearchSequence || elements.gifPicker?.hidden) return;
+    const results = Array.isArray(response?.results) ? response.results : [];
+    if (!response?.ok || !results.length) {
+      elements.gifPickerStatus.hidden = false;
+      elements.gifPickerStatus.textContent = "Não consegui carregar GIFs agora. Tente outra busca.";
+      return;
+    }
+
+    elements.gifPickerStatus.hidden = true;
+    results.forEach((result) => {
+      const url = allowedGifUrl(result?.url);
+      const previewUrl = allowedGifUrl(result?.previewUrl || result?.url);
+      if (!url || !previewUrl) return;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "gif-result-card";
+      button.title = result?.title || "Enviar GIF";
+      const image = document.createElement("img");
+      image.src = previewUrl;
+      image.alt = result?.title || "GIF";
+      image.loading = "lazy";
+      button.append(image);
+      button.addEventListener("click", () => {
+        elements.chatInput.value = url;
+        resizeChatInput();
+        closeGifPicker();
+        void sendChatMessage();
+      });
+      elements.gifResults.append(button);
+    });
+
+    if (!elements.gifResults.childElementCount) {
+      elements.gifPickerStatus.hidden = false;
+      elements.gifPickerStatus.textContent = "Nenhum GIF apareceu nessa busca.";
+    }
+  } catch (_error) {
+    if (requestId !== gifSearchSequence) return;
+    elements.gifPickerStatus.hidden = false;
+    elements.gifPickerStatus.textContent = "Não consegui falar com o Tenor agora.";
+  }
+}
+
+function toggleGifPicker() {
+  if (!elements.gifPicker || !elements.chatGifButton) return;
+  const opening = elements.gifPicker.hidden;
+  if (!opening) {
+    closeGifPicker();
+    return;
+  }
+  closeMentionMenu();
+  elements.gifPicker.hidden = false;
+  elements.chatGifButton.classList.add("is-active");
+  elements.gifSearchInput.value = "";
+  void loadGifPickerResults("");
+  window.setTimeout(() => elements.gifSearchInput?.focus(), 30);
+}
+
+function scheduleGifSearch() {
+  window.clearTimeout(gifSearchTimer);
+  gifSearchTimer = window.setTimeout(() => {
+    void loadGifPickerResults(elements.gifSearchInput?.value || "");
+  }, 320);
+}
+
+function ensureScreenHoverPreview() {
+  let preview = document.getElementById("screen-hover-preview");
+  if (preview) return preview;
+  preview = document.createElement("div");
+  preview.id = "screen-hover-preview";
+  preview.className = "screen-hover-preview";
+  preview.hidden = true;
+  preview.innerHTML = `
+    <div class="screen-hover-preview-head">
+      <div><small>TRANSMITINDO AGORA</small><strong data-screen-preview-name>Transmissão</strong></div>
+      <span>AO VIVO</span>
+    </div>
+    <div class="screen-hover-preview-media">
+      <video data-screen-preview-video autoplay muted playsinline></video>
+      <div data-screen-preview-empty>A transmissão está conectando…</div>
+    </div>
+    <p>Clique para assistir em tamanho maior</p>
+  `;
+  document.body.append(preview);
+  return preview;
+}
+
+function closeScreenHoverPreview() {
+  window.clearTimeout(screenHoverPreviewCloseTimer);
+  screenHoverPreviewCloseTimer = null;
+  const preview = document.getElementById("screen-hover-preview");
+  if (!preview) return;
+  preview.hidden = true;
+  const video = preview.querySelector("[data-screen-preview-video]");
+  if (video) video.srcObject = null;
+}
+
+function openScreenHoverPreview(peerId, anchor) {
+  window.clearTimeout(screenHoverPreviewCloseTimer);
+  screenHoverPreviewCloseTimer = null;
+  const entry = state.screenStreams.get(peerId);
+  if (!entry || !anchor) return;
+  const preview = ensureScreenHoverPreview();
+  const video = preview.querySelector("[data-screen-preview-video]");
+  const empty = preview.querySelector("[data-screen-preview-empty]");
+  const name = preview.querySelector("[data-screen-preview-name]");
+  if (name) name.textContent = entry.isLocal ? "Sua transmissão" : entry.name || memberName(peerId) || "Transmissão";
+  if (video) {
+    video.srcObject = entry.stream || null;
+    video.hidden = !entry.stream;
+  }
+  if (empty) empty.hidden = Boolean(entry.stream);
+
+  preview.hidden = false;
+  preview.style.visibility = "hidden";
+  const rect = anchor.getBoundingClientRect();
+  const width = preview.offsetWidth || 300;
+  const height = preview.offsetHeight || 230;
+  const gap = 12;
+  let left = rect.right + gap;
+  if (left + width > window.innerWidth - 12) left = rect.left - width - gap;
+  let top = rect.top - 12;
+  if (top + height > window.innerHeight - 12) top = window.innerHeight - height - 12;
+  top = Math.max(12, top);
+  left = Math.max(12, Math.min(window.innerWidth - width - 12, left));
+  preview.style.left = `${Math.round(left)}px`;
+  preview.style.top = `${Math.round(top)}px`;
+  preview.style.visibility = "visible";
+}
+
+function bindScreenHoverPreview(node, peerId) {
+  if (!node || !state.activeScreens.has(peerId)) return;
+  node.classList.add("has-screen-preview");
+  node.addEventListener("mouseenter", () => openScreenHoverPreview(peerId, node));
+  node.addEventListener("mouseleave", () => {
+    screenHoverPreviewCloseTimer = window.setTimeout(closeScreenHoverPreview, 90);
+  });
+  node.addEventListener("focusin", () => openScreenHoverPreview(peerId, node));
+  node.addEventListener("focusout", closeScreenHoverPreview);
+}
+
 function renderVoiceMiniList() {
   elements.voiceMiniList.replaceChildren();
   if (state.voiceContextPeerId && !state.members.some((member) => member.peerId === state.voiceContextPeerId)) closeVoiceContextMenu();
@@ -4739,7 +4980,7 @@ function renderVoiceMiniList() {
     const row = document.createElement("div"); row.className = "voice-mini-member"; row.dataset.speakingPeer = member.peerId;
     if (state.speakingPeers.has(member.peerId)) row.classList.add("is-speaking");
     row.addEventListener("contextmenu", (event) => openVoiceContextMenu(event, member.peerId));
-    const avatar = document.createElement("span"); avatar.className = "avatar voice-mini-avatar"; paintAvatar(avatar, member.name, member.avatar);
+    const avatar = document.createElement("button"); avatar.type = "button"; avatar.className = "avatar voice-mini-avatar voice-avatar-profile-trigger"; avatar.dataset.profilePeer = member.peerId; avatar.setAttribute("aria-label", `Abrir perfil de ${member.name}`); paintAvatar(avatar, member.name, member.avatar); avatar.addEventListener("click", (event) => { event.stopPropagation(); closeScreenHoverPreview(); openMemberProfile(member.peerId, event.currentTarget); });
     const name = document.createElement("span"); name.className = "voice-mini-name"; name.textContent = member.name; const role = memberDisplayRole(member); if (role) name.style.color = role.color;
     const right = document.createElement("span"); right.className = "voice-mini-right";
     if (cameraStreamForPeer(member.peerId)) {
@@ -4751,7 +4992,9 @@ function renderVoiceMiniList() {
       right.append(live);
     }
     const states = voiceStateIcons(member); right.append(states);
-    row.append(avatar, name, right); elements.voiceMiniList.append(row);
+    row.append(avatar, name, right);
+    if (state.activeScreens.has(member.peerId)) bindScreenHoverPreview(row, member.peerId);
+    elements.voiceMiniList.append(row);
   });
   refreshVoiceDurationLabels();
   applySpeakingStateToDom();
@@ -4775,7 +5018,7 @@ function renderVoiceGrid() {
     if (isSelf) tile.classList.add("voice-tile--self");
     else {
       tile.classList.add("voice-tile--adjustable"); tile.tabIndex = 0; tile.title = `Clique para ajustar o volume de ${member.name}`;
-      tile.addEventListener("click", (event) => { if (!event.target.closest(".voice-tile-live-badge")) openMemberDialog(member.peerId); });
+      tile.addEventListener("click", (event) => { if (!event.target.closest(".voice-tile-live-badge, .voice-avatar-profile-trigger")) openMemberDialog(member.peerId); });
       tile.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openMemberDialog(member.peerId); } });
     }
     if (member.serverMuted || member.muted || member.deafened) tile.classList.add("voice-tile--muted");
@@ -4784,11 +5027,13 @@ function renderVoiceGrid() {
       tile.classList.add("voice-tile--camera");
       const video = document.createElement("video"); video.className = "voice-camera-video"; video.autoplay = true; video.playsInline = true; video.muted = isSelf; video.srcObject = cameraStream; tile.append(video);
     } else {
-      const avatar = document.createElement("div"); avatar.className = "avatar voice-tile-avatar"; paintAvatar(avatar, member.name, member.avatar); tile.append(avatar);
+      const avatar = document.createElement("button"); avatar.type = "button"; avatar.className = "avatar voice-tile-avatar voice-avatar-profile-trigger"; avatar.dataset.profilePeer = member.peerId; avatar.setAttribute("aria-label", `Abrir perfil de ${member.name}`); paintAvatar(avatar, member.name, member.avatar); avatar.addEventListener("click", (event) => { event.stopPropagation(); openMemberProfile(member.peerId, event.currentTarget); }); tile.append(avatar);
     }
     if (state.activeScreens.has(member.peerId)) {
       const live = document.createElement("button"); live.type = "button"; live.className = "voice-tile-live-badge"; live.textContent = "AO VIVO"; live.title = `Assistir à tela de ${member.name}`;
-      live.addEventListener("click", (event) => { event.stopPropagation(); if (state.screenStreams.has(member.peerId)) setScreenLayout("focus", member.peerId); }); tile.append(live);
+      live.addEventListener("click", (event) => { event.stopPropagation(); if (state.screenStreams.has(member.peerId)) setScreenLayout("focus", member.peerId); });
+      bindScreenHoverPreview(live, member.peerId);
+      tile.append(live);
     }
     const meta = document.createElement("div"); meta.className = "voice-tile-meta";
     const name = document.createElement("strong"); name.textContent = isSelf ? `${member.name} (você)` : member.name; const role = memberDisplayRole(member); if (role) name.style.color = role.color;
@@ -6275,9 +6520,9 @@ function shareProfile() {
     "1440p": { width: 2560, height: 1440 },
   };
   const bitrates = {
-    "720p": { 15: 4_000_000, 30: 7_000_000, 60: 12_000_000 },
-    "1080p": { 15: 7_000_000, 30: 12_000_000, 60: 20_000_000 },
-    "1440p": { 15: 10_000_000, 30: 18_000_000, 60: 30_000_000 },
+    "720p": { 15: 2_500_000, 30: 4_000_000, 60: 7_000_000 },
+    "1080p": { 15: 4_000_000, 30: 7_000_000, 60: 12_000_000 },
+    "1440p": { 15: 6_000_000, 30: 11_000_000, 60: 18_000_000 },
   };
   return { quality, fps, ...sizes[quality], bitrate: bitrates[quality][fps] };
 }
@@ -6287,7 +6532,7 @@ function updateShareQualityHint() {
   state.shareFps = Number(elements.shareFpsSelect.value) || state.shareFps;
   const profile = shareProfile();
   const mbps = Math.round(profile.bitrate / 100_000) / 10;
-  elements.shareQualityHint.textContent = `${profile.quality} · ${profile.fps} FPS · até ~${mbps} Mb/s de vídeo. A qualidade real depende da conexão e da tela/janela compartilhada.`;
+  elements.shareQualityHint.textContent = `${profile.quality} · ${profile.fps} FPS · até ~${mbps} Mb/s adaptativos. O Resenhazinha reduz ou aumenta o envio conforme a conexão para evitar travamentos.`;
 }
 
 async function captureDisplayMedia(includeAudio) {

@@ -772,89 +772,115 @@ app.whenReady().then(() => {
     if (process.platform !== "win32") return { ok: false, reason: "unsupported-platform" };
 
     const requestedExclusions = Array.isArray(excludedProcessIds)
-      ? excludedProcessIds.map(Number)
-      : excludedProcessIds == null ? [] : [Number(excludedProcessIds)];
+      ? excludedProcessIds.map(Number).filter((processId) => Number.isInteger(processId) && processId > 0)
+      : excludedProcessIds == null ? [] : [Number(excludedProcessIds)].filter((processId) => Number.isInteger(processId) && processId > 0);
 
     const sender = event.sender;
+    stopFilteredAudioCapture();
     filteredAudioSender = sender;
-    filteredAudioExcludedProcessIds = new Set(
-      requestedExclusions.filter((processId) => Number.isInteger(processId) && processId > 0),
-    );
-
-    const syncFilteredAudioCaptures = async () => {
-      if (!filteredAudioSender || filteredAudioSender.isDestroyed()) {
-        stopFilteredAudioCapture();
-        return { capturedProcessIds: [] };
-      }
-
-      const sources = await desktopCapturer.getSources({
-        types: ["screen", "window"],
-        thumbnailSize: { width: 1, height: 1 },
-        fetchWindowIcons: false,
-      });
-      const [processIds, processParents] = await Promise.all([
-        resolveWindowProcessIds(sources),
-        resolveProcessParents(),
-      ]);
-      audioProcessParents = processParents;
-      allowedAudioProcessIds = new Set([process.pid, ...processIds.values()]);
-
-      const ownSourceId = mainWindow?.getMediaSourceId();
-      protectedAudioProcessIds = new Set([process.pid]);
-      const ownSourceProcessId = ownSourceId ? processIds.get(ownSourceId) : null;
-      if (ownSourceProcessId) protectedAudioProcessIds.add(ownSourceProcessId);
-
-      const excluded = new Set([
-        ...protectedAudioProcessIds,
-        ...filteredAudioExcludedProcessIds,
-      ]);
-      const captureCandidates = [...allowedAudioProcessIds]
-        .filter((processId) => ![...excluded].some((excludedProcessId) => processTreesOverlap(processId, excludedProcessId)));
-      const includedProcessIds = captureCandidates
-        .filter((processId) => !captureCandidates.some((otherProcessId) => (
-          otherProcessId !== processId && isProcessAncestor(otherProcessId, processId)
-        )))
-        .slice(0, MAX_MIXED_AUDIO_PROCESSES);
-      const includedSet = new Set(includedProcessIds);
-
-      for (const [processId, capture] of [...filteredAudioCaptures.entries()]) {
-        if (includedSet.has(processId)) continue;
-        filteredAudioCaptures.delete(processId);
-        try { capture.stop(); } catch (_error) {}
-      }
-
-      const failedProcessIds = [];
-      const { LoopbackCapture } = require(filteredAudioAddonPath());
-      for (const processId of includedProcessIds) {
-        if (filteredAudioCaptures.has(processId)) continue;
-        const capture = new LoopbackCapture();
-        try {
-          capture.start(processId, true, (chunk) => {
-            if (
-              filteredAudioCaptures.get(processId) !== capture
-              || filteredAudioSender !== sender
-              || sender.isDestroyed()
-            ) return;
-            sender.send("resenhazinha:filtered-audio-chunk", { processId, chunk });
-          });
-          filteredAudioCaptures.set(processId, capture);
-        } catch (_error) {
-          failedProcessIds.push(processId);
-        }
-      }
-
-      return {
-        capturedProcessIds: [...filteredAudioCaptures.keys()],
-        failedProcessIds,
-      };
-    };
+    filteredAudioExcludedProcessIds = new Set(requestedExclusions);
 
     try {
-      stopFilteredAudioCapture();
-      filteredAudioSender = sender;
-      filteredAudioExcludedProcessIds = new Set(
-        requestedExclusions.filter((processId) => Number.isInteger(processId) && processId > 0),
-      );
+      const { LoopbackCapture } = require(filteredAudioAddonPath());
+
+      // Caminho principal: o WASAPI captura o sistema inteiro EXCETO a árvore
+      // do Resenhazinha. Isso mantém a call fora do compartilhamento e, por ser
+      // uma captura contínua do sistema, aplicativos abertos depois entram no
+      // áudio automaticamente sem reiniciar a transmissão.
+      if (requestedExclusions.length === 0) {
+        const capture = new LoopbackCapture();
+        capture.start(process.pid, false, (chunk) => {
+          if (
+            filteredAudioCaptures.get("system-except-resenhazinha") !== capture
+            || filteredAudioSender !== sender
+            || sender.isDestroyed()
+          ) return;
+          sender.send("resenhazinha:filtered-audio-chunk", {
+            processId: "system-except-resenhazinha",
+            chunk,
+          });
+        });
+        filteredAudioCaptures.set("system-except-resenhazinha", capture);
+        return {
+          ok: true,
+          mode: "system-except-resenhazinha",
+          sampleRate: 48_000,
+          channels: 2,
+          format: "s16le",
+          capturedProcessIds: ["system-except-resenhazinha"],
+          failedProcessIds: [],
+        };
+      }
+
+      // Se a pessoa escolheu silenciar aplicativos extras, preservamos o mixer
+      // seletivo por processo. Ele é reavaliado enquanto a transmissão estiver
+      // ativa para incluir aplicativos que surgirem depois.
+      const syncFilteredAudioCaptures = async () => {
+        if (!filteredAudioSender || filteredAudioSender.isDestroyed()) {
+          stopFilteredAudioCapture();
+          return { capturedProcessIds: [] };
+        }
+
+        const sources = await desktopCapturer.getSources({
+          types: ["screen", "window"],
+          thumbnailSize: { width: 1, height: 1 },
+          fetchWindowIcons: false,
+        });
+        const [processIds, processParents] = await Promise.all([
+          resolveWindowProcessIds(sources),
+          resolveProcessParents(),
+        ]);
+        audioProcessParents = processParents;
+        allowedAudioProcessIds = new Set([process.pid, ...processIds.values()]);
+
+        const ownSourceId = mainWindow?.getMediaSourceId();
+        protectedAudioProcessIds = new Set([process.pid]);
+        const ownSourceProcessId = ownSourceId ? processIds.get(ownSourceId) : null;
+        if (ownSourceProcessId) protectedAudioProcessIds.add(ownSourceProcessId);
+
+        const excluded = new Set([
+          ...protectedAudioProcessIds,
+          ...filteredAudioExcludedProcessIds,
+        ]);
+        const captureCandidates = [...allowedAudioProcessIds]
+          .filter((processId) => ![...excluded].some((excludedProcessId) => processTreesOverlap(processId, excludedProcessId)));
+        const includedProcessIds = captureCandidates
+          .filter((processId) => !captureCandidates.some((otherProcessId) => (
+            otherProcessId !== processId && isProcessAncestor(otherProcessId, processId)
+          )))
+          .slice(0, MAX_MIXED_AUDIO_PROCESSES);
+        const includedSet = new Set(includedProcessIds);
+
+        for (const [processId, capture] of [...filteredAudioCaptures.entries()]) {
+          if (includedSet.has(processId)) continue;
+          filteredAudioCaptures.delete(processId);
+          try { capture.stop(); } catch (_error) {}
+        }
+
+        const failedProcessIds = [];
+        for (const processId of includedProcessIds) {
+          if (filteredAudioCaptures.has(processId)) continue;
+          const capture = new LoopbackCapture();
+          try {
+            capture.start(processId, true, (chunk) => {
+              if (
+                filteredAudioCaptures.get(processId) !== capture
+                || filteredAudioSender !== sender
+                || sender.isDestroyed()
+              ) return;
+              sender.send("resenhazinha:filtered-audio-chunk", { processId, chunk });
+            });
+            filteredAudioCaptures.set(processId, capture);
+          } catch (_error) {
+            failedProcessIds.push(processId);
+          }
+        }
+
+        return {
+          capturedProcessIds: [...filteredAudioCaptures.keys()],
+          failedProcessIds,
+        };
+      };
 
       const first = await syncFilteredAudioCaptures();
       if (!first.capturedProcessIds.length) {
@@ -881,9 +907,53 @@ app.whenReady().then(() => {
     }
   });
 
-    ipcMain.handle("resenhazinha:stop-filtered-audio", () => {
+  ipcMain.handle("resenhazinha:stop-filtered-audio", () => {
     stopFilteredAudioCapture();
     return { stopped: true };
+  });
+
+  ipcMain.handle("resenhazinha:search-gifs", async (_event, rawQuery) => {
+    const query = String(rawQuery || "").replace(/\s+/g, " ").trim().slice(0, 60);
+    const term = query || "";
+    const slug = encodeURIComponent(term.toLocaleLowerCase("pt-BR").replace(/\s+/g, "-"));
+    const url = term ? `https://tenor.com/search/${slug}-gifs` : "https://tenor.com/search/trending-gifs";
+
+    try {
+      const response = await fetch(url, {
+        headers: {
+          "accept": "text/html,application/xhtml+xml",
+          "accept-language": "pt-BR,pt;q=0.9,en;q=0.7",
+          "user-agent": "Mozilla/5.0 Resenhazinha/5.1",
+        },
+        redirect: "follow",
+      });
+      if (!response.ok) return { ok: false, reason: "provider-unavailable", results: [] };
+      let html = await response.text();
+      html = html
+        .replaceAll("\\u002F", "/")
+        .replaceAll("\\u0026", "&")
+        .replaceAll("\\/", "/")
+        .replaceAll("&amp;", "&");
+
+      const matches = html.match(/https:\/\/media\.tenor\.com\/[^"'<>\\\s]+?\.(?:gif|webp)(?:\?[^"'<>\\\s]*)?/gi) || [];
+      const seen = new Set();
+      const results = [];
+      for (const rawUrl of matches) {
+        let mediaUrl = String(rawUrl).replace(/[),.;]+$/, "");
+        if (!/^https:\/\/media\.tenor\.com\//i.test(mediaUrl) || seen.has(mediaUrl)) continue;
+        seen.add(mediaUrl);
+        results.push({
+          id: crypto.createHash("sha1").update(mediaUrl).digest("hex").slice(0, 16),
+          url: mediaUrl,
+          previewUrl: mediaUrl,
+          title: query || "GIF em destaque",
+        });
+        if (results.length >= 36) break;
+      }
+      return { ok: results.length > 0, provider: "Tenor", query, results };
+    } catch (_error) {
+      return { ok: false, reason: "provider-unavailable", results: [] };
+    }
   });
 
   ipcMain.on("resenhazinha:voice-active", (_event, active) => {
