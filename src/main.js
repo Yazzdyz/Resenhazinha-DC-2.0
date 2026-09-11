@@ -4704,18 +4704,43 @@ function voiceStateIcons(member) {
   return wrap;
 }
 
+function memberIsSharingScreen(member) {
+  if (!member) return false;
+  if (state.activeScreens.has(member.peerId)) return true;
+  const clientId = sanitizeClientId(member.clientId);
+  return Boolean(clientId && [...state.activeScreens.values()].some((screen) => sanitizeClientId(screen.clientId) === clientId));
+}
+
+function sortedVoiceMembers() {
+  return state.members
+    .filter((member) => member.inVoice)
+    .slice()
+    .sort((a, b) => {
+      const aSharing = memberIsSharingScreen(a) ? 1 : 0;
+      const bSharing = memberIsSharingScreen(b) ? 1 : 0;
+      if (aSharing !== bSharing) return bSharing - aSharing;
+
+      const aJoined = normalizeVoiceJoinedAt(a.voiceJoinedAt) || Number.MAX_SAFE_INTEGER;
+      const bJoined = normalizeVoiceJoinedAt(b.voiceJoinedAt) || Number.MAX_SAFE_INTEGER;
+      if (aJoined !== bJoined) return aJoined - bJoined;
+
+      const aId = sanitizeClientId(a.clientId) || String(a.peerId || "");
+      const bId = sanitizeClientId(b.clientId) || String(b.peerId || "");
+      return aId.localeCompare(bId);
+    });
+}
+
 function renderVoiceMiniList() {
   elements.voiceMiniList.replaceChildren();
   if (state.voiceContextPeerId && !state.members.some((member) => member.peerId === state.voiceContextPeerId)) closeVoiceContextMenu();
   if (!state.server.voiceChannel.exists) return;
-  state.members.filter((member) => member.inVoice).forEach((member) => {
+  sortedVoiceMembers().forEach((member) => {
     const row = document.createElement("div"); row.className = "voice-mini-member"; row.dataset.speakingPeer = member.peerId;
     if (state.speakingPeers.has(member.peerId)) row.classList.add("is-speaking");
     row.addEventListener("contextmenu", (event) => openVoiceContextMenu(event, member.peerId));
     const avatar = document.createElement("span"); avatar.className = "avatar voice-mini-avatar"; paintAvatar(avatar, member.name, member.avatar);
     const name = document.createElement("span"); name.className = "voice-mini-name"; name.textContent = member.name; const role = memberDisplayRole(member); if (role) name.style.color = role.color;
     const right = document.createElement("span"); right.className = "voice-mini-right";
-    const duration = document.createElement("time"); duration.className = "voice-call-duration voice-call-duration--mini"; duration.dataset.voiceJoinedAt = String(normalizeVoiceJoinedAt(member.voiceJoinedAt) || ""); duration.textContent = formatVoiceDuration(member.voiceJoinedAt); right.append(duration);
     if (cameraStreamForPeer(member.peerId)) {
       const camera = document.createElement("span"); camera.className = "voice-camera-indicator"; camera.title = "Câmera ligada"; camera.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="m16 10 5-3v10l-5-3v-4Z"/></svg>'; right.append(camera);
     }
@@ -4738,7 +4763,7 @@ function renderVoiceGrid() {
   if (!state.inVoice) {
     const empty = document.createElement("div"); empty.className = "voice-empty-card"; const title = document.createElement("strong"); title.textContent = "Você está fora da call"; const copy = document.createElement("span"); copy.textContent = `Entre em ${state.server.voiceChannel.name} para ouvir e falar com a galera.`; const join = document.createElement("button"); join.className = "button button--primary voice-empty-join"; join.type = "button"; join.textContent = "Entrar na call"; join.addEventListener("click", joinVoiceChannel); empty.append(title, copy, join); elements.stageEmpty.append(empty); elements.stageEmpty.hidden = state.screenStreams.size > 0; renderVoiceConnectionPanel(); return;
   }
-  const voiceMembers = state.members.filter((member) => member.inVoice);
+  const voiceMembers = sortedVoiceMembers();
   if (!voiceMembers.length) {
     const empty = document.createElement("div"); empty.className = "voice-empty-card"; empty.innerHTML = "<strong>A call está vazia</strong><span>Você pode entrar quando quiser.</span>"; elements.stageEmpty.append(empty);
   } else voiceMembers.forEach((member) => {
@@ -4768,9 +4793,8 @@ function renderVoiceGrid() {
     const name = document.createElement("strong"); name.textContent = isSelf ? `${member.name} (você)` : member.name; const role = memberDisplayRole(member); if (role) name.style.color = role.color;
     const reconnecting = !isSelf && callSessions.retryScheduled("voice", member.peerId);
     if (reconnecting) tile.classList.add("voice-tile--reconnecting");
-    const duration = document.createElement("time"); duration.className = "voice-call-duration voice-call-duration--tile"; duration.dataset.voiceJoinedAt = String(normalizeVoiceJoinedAt(member.voiceJoinedAt) || ""); duration.textContent = formatVoiceDuration(member.voiceJoinedAt);
     const status = document.createElement("span"); status.textContent = reconnecting ? "Reconectando…" : member.deafened ? "Áudio desativado" : member.serverMuted ? "Mutado pelo servidor" : member.muted ? "Microfone desligado" : "Na call";
-    meta.append(name, duration, status);
+    meta.append(name, status);
     const states = voiceStateIcons(member); states.classList.add("voice-state-icons--tile");
     tile.append(meta, states); elements.stageEmpty.append(tile);
   });
