@@ -914,9 +914,9 @@ app.whenReady().then(() => {
 
   ipcMain.handle("resenhazinha:search-gifs", async (_event, rawQuery) => {
     const query = String(rawQuery || "").replace(/\s+/g, " ").trim().slice(0, 60);
-    const term = query || "reaction";
+    const term = query || "";
     const slug = encodeURIComponent(term.toLocaleLowerCase("pt-BR").replace(/\s+/g, "-"));
-    const url = `https://tenor.com/search/${slug}-gifs`;
+    const url = term ? `https://tenor.com/search/${slug}-gifs` : "https://tenor.com/search/trending-gifs";
 
     try {
       const response = await fetch(url, {
