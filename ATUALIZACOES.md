@@ -1,3 +1,10 @@
+# v5.0.0
+
+- Clicar no canal de voz agora entra diretamente na call.
+- O compartilhamento com som passa a detectar dinamicamente aplicativos abertos depois do início da transmissão.
+- Maior teto de bitrate para 720p, 1080p e 1440p, com prioridade alta para o vídeo e preferência por fluidez em 60 FPS.
+- Mantém as melhorias preparadas na 4.5.2: ordem estável dos membros, transmissor no topo, sem timers individuais e apenas timer geral da call.
+
 # Atualizações do Resenhazinha
 
 ## 4.5.2
