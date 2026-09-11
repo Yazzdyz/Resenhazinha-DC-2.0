@@ -13,6 +13,8 @@ let voicePowerSaveBlockerId = null;
 let pendingDesktopSourceId = null;
 let filteredAudioCaptures = new Map();
 let filteredAudioSender = null;
+let filteredAudioRefreshTimer = null;
+let filteredAudioExcludedProcessIds = new Set();
 let allowedAudioProcessIds = new Set();
 let protectedAudioProcessIds = new Set([process.pid]);
 let audioProcessParents = new Map([[process.pid, process.ppid]]);
@@ -27,6 +29,11 @@ const UPDATE_REPOSITORY = "Yazzdyz/Resenhazinha-DC-2.0";
 const UPDATE_ASSET_PATTERN = /Resenhazinha.*Windows\.zip$/i;
 
 function stopFilteredAudioCapture() {
+  if (filteredAudioRefreshTimer) {
+    clearInterval(filteredAudioRefreshTimer);
+    filteredAudioRefreshTimer = null;
+  }
+  filteredAudioExcludedProcessIds = new Set();
   const captures = [...filteredAudioCaptures.values()];
   filteredAudioCaptures = new Map();
   filteredAudioSender = null;
@@ -761,40 +768,65 @@ app.whenReady().then(() => {
     });
   });
 
-  ipcMain.handle("resenhazinha:start-filtered-audio", (event, excludedProcessIds) => {
+  ipcMain.handle("resenhazinha:start-filtered-audio", async (event, excludedProcessIds) => {
     if (process.platform !== "win32") return { ok: false, reason: "unsupported-platform" };
 
     const requestedExclusions = Array.isArray(excludedProcessIds)
       ? excludedProcessIds.map(Number)
       : excludedProcessIds == null ? [] : [Number(excludedProcessIds)];
-    const exclusionsAreValid = requestedExclusions.every(
-      (processId) => Number.isInteger(processId) && processId > 0 && allowedAudioProcessIds.has(processId),
-    );
-    if (!exclusionsAreValid) return { ok: false, reason: "invalid-process" };
 
-    // A call nunca entra na lista de captura. Os outros aplicativos são
-    // capturados individualmente e depois misturados no renderer.
-    const excluded = new Set([...protectedAudioProcessIds, ...requestedExclusions]);
-    const captureCandidates = [...allowedAudioProcessIds]
-      .filter((processId) => (
-        ![...excluded].some((excludedProcessId) => processTreesOverlap(processId, excludedProcessId))
-      ));
-    const includedProcessIds = captureCandidates
-      // Evita misturar o mesmo áudio duas vezes quando uma janela pertence à
-      // árvore de outro aplicativo já incluído (por exemplo, jogo + launcher).
-      .filter((processId) => !captureCandidates.some((otherProcessId) => (
-        otherProcessId !== processId && isProcessAncestor(otherProcessId, processId)
-      )))
-      .slice(0, MAX_MIXED_AUDIO_PROCESSES);
-
-    stopFilteredAudioCapture();
     const sender = event.sender;
     filteredAudioSender = sender;
-    const failedProcessIds = [];
+    filteredAudioExcludedProcessIds = new Set(
+      requestedExclusions.filter((processId) => Number.isInteger(processId) && processId > 0),
+    );
 
-    try {
+    const syncFilteredAudioCaptures = async () => {
+      if (!filteredAudioSender || filteredAudioSender.isDestroyed()) {
+        stopFilteredAudioCapture();
+        return { capturedProcessIds: [] };
+      }
+
+      const sources = await desktopCapturer.getSources({
+        types: ["screen", "window"],
+        thumbnailSize: { width: 1, height: 1 },
+        fetchWindowIcons: false,
+      });
+      const [processIds, processParents] = await Promise.all([
+        resolveWindowProcessIds(sources),
+        resolveProcessParents(),
+      ]);
+      audioProcessParents = processParents;
+      allowedAudioProcessIds = new Set([process.pid, ...processIds.values()]);
+
+      const ownSourceId = mainWindow?.getMediaSourceId();
+      protectedAudioProcessIds = new Set([process.pid]);
+      const ownSourceProcessId = ownSourceId ? processIds.get(ownSourceId) : null;
+      if (ownSourceProcessId) protectedAudioProcessIds.add(ownSourceProcessId);
+
+      const excluded = new Set([
+        ...protectedAudioProcessIds,
+        ...filteredAudioExcludedProcessIds,
+      ]);
+      const captureCandidates = [...allowedAudioProcessIds]
+        .filter((processId) => ![...excluded].some((excludedProcessId) => processTreesOverlap(processId, excludedProcessId)));
+      const includedProcessIds = captureCandidates
+        .filter((processId) => !captureCandidates.some((otherProcessId) => (
+          otherProcessId !== processId && isProcessAncestor(otherProcessId, processId)
+        )))
+        .slice(0, MAX_MIXED_AUDIO_PROCESSES);
+      const includedSet = new Set(includedProcessIds);
+
+      for (const [processId, capture] of [...filteredAudioCaptures.entries()]) {
+        if (includedSet.has(processId)) continue;
+        filteredAudioCaptures.delete(processId);
+        try { capture.stop(); } catch (_error) {}
+      }
+
+      const failedProcessIds = [];
       const { LoopbackCapture } = require(filteredAudioAddonPath());
-      includedProcessIds.forEach((processId) => {
+      for (const processId of includedProcessIds) {
+        if (filteredAudioCaptures.has(processId)) continue;
         const capture = new LoopbackCapture();
         try {
           capture.start(processId, true, (chunk) => {
@@ -809,21 +841,39 @@ app.whenReady().then(() => {
         } catch (_error) {
           failedProcessIds.push(processId);
         }
-      });
-
-      const capturedProcessIds = [...filteredAudioCaptures.keys()];
-      if (!capturedProcessIds.length) {
-        stopFilteredAudioCapture();
-        return { ok: false, reason: includedProcessIds.length ? "capture-unavailable" : "no-audio-apps" };
       }
+
+      return {
+        capturedProcessIds: [...filteredAudioCaptures.keys()],
+        failedProcessIds,
+      };
+    };
+
+    try {
+      stopFilteredAudioCapture();
+      filteredAudioSender = sender;
+      filteredAudioExcludedProcessIds = new Set(
+        requestedExclusions.filter((processId) => Number.isInteger(processId) && processId > 0),
+      );
+
+      const first = await syncFilteredAudioCaptures();
+      if (!first.capturedProcessIds.length) {
+        stopFilteredAudioCapture();
+        return { ok: false, reason: "no-audio-apps" };
+      }
+
+      filteredAudioRefreshTimer = setInterval(() => {
+        syncFilteredAudioCaptures().catch(() => undefined);
+      }, 1500);
+
       return {
         ok: true,
-        mode: "application-allow-list",
+        mode: "dynamic-application-allow-list",
         sampleRate: 48_000,
         channels: 2,
         format: "s16le",
-        capturedProcessIds,
-        failedProcessIds,
+        capturedProcessIds: first.capturedProcessIds,
+        failedProcessIds: first.failedProcessIds,
       };
     } catch (_error) {
       stopFilteredAudioCapture();
@@ -831,7 +881,7 @@ app.whenReady().then(() => {
     }
   });
 
-  ipcMain.handle("resenhazinha:stop-filtered-audio", () => {
+    ipcMain.handle("resenhazinha:stop-filtered-audio", () => {
     stopFilteredAudioCapture();
     return { stopped: true };
   });
