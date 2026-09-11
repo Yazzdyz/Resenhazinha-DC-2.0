@@ -1,5 +1,16 @@
 # Atualizações do Resenhazinha
 
+## 4.5.1
+
+- Foco exclusivo no áudio da call.
+- A voz enviada pelo WebRTC passa a usar a captura bruta do microfone, sem depender do MediaStreamDestination do processamento local.
+- Mute e server-mute controlam tanto a track bruta quanto a track processada.
+- A voz remota passa a tocar direto em um elemento <audio>, sem AudioContext/GainNode/MediaStreamDestination no caminho crítico.
+- Mantém seleção de saída do sistema e volume individual básico.
+- Adiciona tentativas curtas de play e logs quando a track remota chega sem áudio.
+- Nenhuma alteração em tela, Cloudflare, roster ou servidor.
+
+
 ## 4.5.0
 
 - Voz e compartilhamento de tela deixam de usar PeerJS MediaCall.
