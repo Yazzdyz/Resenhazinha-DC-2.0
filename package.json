@@ -1,6 +1,6 @@
 {
   "name": "resenhazinha",
-  "version": "4.5.0",
+  "version": "4.5.1",
   "private": true,
   "type": "module",
   "description": "Resenhazinha com servidor persistente, perfis sincronizados e atualização automática via GitHub Releases.",
