@@ -4912,7 +4912,7 @@ function ensureScreenHoverPreview() {
       <video data-screen-preview-video autoplay muted playsinline></video>
       <div data-screen-preview-empty>A transmissão está conectando…</div>
     </div>
-    <p>Clipe para assistir em tamanho maior</p>
+    <p>Clique para assistir em tamanho maior</p>
   `;
   document.body.append(preview);
   return preview;
@@ -4980,7 +4980,7 @@ function renderVoiceMiniList() {
     const row = document.createElement("div"); row.className = "voice-mini-member"; row.dataset.speakingPeer = member.peerId;
     if (state.speakingPeers.has(member.peerId)) row.classList.add("is-speaking");
     row.addEventListener("contextmenu", (event) => openVoiceContextMenu(event, member.peerId));
-    const avatar = document.createElement("span"); avatar.className = "avatar voice-mini-avatar"; paintAvatar(avatar, member.name, member.avatar);
+    const avatar = document.createElement("button"); avatar.type = "button"; avatar.className = "avatar voice-mini-avatar voice-avatar-profile-trigger"; avatar.dataset.profilePeer = member.peerId; avatar.setAttribute("aria-label", `Abrir perfil de ${member.name}`); paintAvatar(avatar, member.name, member.avatar); avatar.addEventListener("click", (event) => { event.stopPropagation(); closeScreenHoverPreview(); openMemberProfile(member.peerId, event.currentTarget); });
     const name = document.createElement("span"); name.className = "voice-mini-name"; name.textContent = member.name; const role = memberDisplayRole(member); if (role) name.style.color = role.color;
     const right = document.createElement("span"); right.className = "voice-mini-right";
     if (cameraStreamForPeer(member.peerId)) {
@@ -5018,7 +5018,7 @@ function renderVoiceGrid() {
     if (isSelf) tile.classList.add("voice-tile--self");
     else {
       tile.classList.add("voice-tile--adjustable"); tile.tabIndex = 0; tile.title = `Clique para ajustar o volume de ${member.name}`;
-      tile.addEventListener("click", (event) => { if (!event.target.closest(".voice-tile-live-badge")) openMemberDialog(member.peerId); });
+      tile.addEventListener("click", (event) => { if (!event.target.closest(".voice-tile-live-badge, .voice-avatar-profile-trigger")) openMemberDialog(member.peerId); });
       tile.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openMemberDialog(member.peerId); } });
     }
     if (member.serverMuted || member.muted || member.deafened) tile.classList.add("voice-tile--muted");
@@ -5027,7 +5027,7 @@ function renderVoiceGrid() {
       tile.classList.add("voice-tile--camera");
       const video = document.createElement("video"); video.className = "voice-camera-video"; video.autoplay = true; video.playsInline = true; video.muted = isSelf; video.srcObject = cameraStream; tile.append(video);
     } else {
-      const avatar = document.createElement("div"); avatar.className = "avatar voice-tile-avatar"; paintAvatar(avatar, member.name, member.avatar); tile.append(avatar);
+      const avatar = document.createElement("button"); avatar.type = "button"; avatar.className = "avatar voice-tile-avatar voice-avatar-profile-trigger"; avatar.dataset.profilePeer = member.peerId; avatar.setAttribute("aria-label", `Abrir perfil de ${member.name}`); paintAvatar(avatar, member.name, member.avatar); avatar.addEventListener("click", (event) => { event.stopPropagation(); openMemberProfile(member.peerId, event.currentTarget); }); tile.append(avatar);
     }
     if (state.activeScreens.has(member.peerId)) {
       const live = document.createElement("button"); live.type = "button"; live.className = "voice-tile-live-badge"; live.textContent = "AO VIVO"; live.title = `Assistir à tela de ${member.name}`;
