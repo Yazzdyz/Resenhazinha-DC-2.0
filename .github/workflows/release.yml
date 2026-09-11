@@ -2,8 +2,7 @@ name: Publicar versão do Resenhazinha
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
     paths-ignore:
       - ".github/inspect/**"
       - ".github/workflows/inspect-patched.yml"
@@ -12,8 +11,12 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
 env:
-  APP_VERSION: "4.2.8"
+  APP_VERSION: "4.3.0"
 
 jobs:
   windows-release:
@@ -23,310 +26,38 @@ jobs:
       - name: Baixar código
         uses: actions/checkout@v4
 
-      - name: Aplicar atualização base
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $partNames = @(
-            "01.txt", "02.txt", "03.txt",
-            "04r1.txt", "04r2.txt", "04r3.txt", "04r4.txt",
-            "04fix2.txt", "04fix3.txt", "04fix4.txt", "04fix5.txt", "04fix6.txt", "04fix7.txt",
-            "05.txt", "06.txt", "07.txt", "08.txt"
-          )
-          $encoded = ($partNames | ForEach-Object { (Get-Content (Join-Path ".github/patch-parts" $_) -Raw).Trim() }) -join ""
-          $gzipPath = Join-Path $env:RUNNER_TEMP "resenhazinha-base.patch.gz"
-          $patchPath = Join-Path $env:RUNNER_TEMP "resenhazinha-base.patch"
-          [IO.File]::WriteAllBytes($gzipPath, [Convert]::FromBase64String($encoded))
-          python -c "import gzip,sys; open(sys.argv[2],'wb').write(gzip.open(sys.argv[1],'rb').read())" "$gzipPath" "$patchPath"
-          git apply --whitespace=nowarn $patchPath
-
-      - name: Aplicar atualizações Python
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $scripts = @(
-            ".github/apply-server-exit-v3.0.5.py.gz.b64",
-            ".github/apply-server-menu-v3.0.6.py.gz.b64",
-            ".github/apply-voice-mixer-v3.1.0.py.gz.b64",
-            ".github/apply-resenhazinha-v3.2.0.py.gz.b64"
-          )
-          $index = 0
-          foreach ($src in $scripts) {
-            $index++
-            $encoded = (Get-Content $src -Raw).Trim()
-            $gzipPath = Join-Path $env:RUNNER_TEMP "resenhazinha-python-$index.py.gz"
-            $scriptPath = Join-Path $env:RUNNER_TEMP "resenhazinha-python-$index.py"
-            [IO.File]::WriteAllBytes($gzipPath, [Convert]::FromBase64String($encoded))
-            python -c "import gzip,sys; open(sys.argv[2],'wb').write(gzip.open(sys.argv[1],'rb').read())" "$gzipPath" "$scriptPath"
-            python "$scriptPath"
-          }
-
-      - name: Aplicar atualizações recentes
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $patches = @(
-            ".github/apply-ui-v3.2.1.patch.gz.b64",
-            ".github/apply-voice-presence-v3.3.0.patch.gz.b64",
-            ".github/apply-stability-v3.3.1.patch.gz.b64",
-            ".github/apply-hotfix-v3.3.2.patch.gz.b64"
-          )
-          $index = 0
-          foreach ($src in $patches) {
-            $index++
-            $encoded = (Get-Content $src -Raw).Trim()
-            $gzipPath = Join-Path $env:RUNNER_TEMP "resenhazinha-patch-$index.patch.gz"
-            $patchPath = Join-Path $env:RUNNER_TEMP "resenhazinha-patch-$index.patch"
-            [IO.File]::WriteAllBytes($gzipPath, [Convert]::FromBase64String($encoded))
-            python -c "import gzip,sys; open(sys.argv[2],'wb').write(gzip.open(sys.argv[1],'rb').read())" "$gzipPath" "$patchPath"
-            git apply --whitespace=nowarn $patchPath
-          }
-
-      - name: Aplicar roteamento de voz v3.3.3
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $encoded = (Get-Content ".github/apply-voice-routing-v3.3.3.py.gz.b64" -Raw).Trim()
-          $gzipPath = Join-Path $env:RUNNER_TEMP "apply-voice-routing-v333.py.gz"
-          $scriptPath = Join-Path $env:RUNNER_TEMP "apply-voice-routing-v333.py"
-          [IO.File]::WriteAllBytes($gzipPath, [Convert]::FromBase64String($encoded))
-          python -c "import gzip,sys; open(sys.argv[2],'wb').write(gzip.open(sys.argv[1],'rb').read())" "$gzipPath" "$scriptPath"
-          python "$scriptPath"
-          git diff --check
-          node --check src/main.js
-          node --check public/mic-noise-worklet.js
-          node --check electron/main.cjs
-          node --check electron/preload.cjs
-
-      - name: Aplicar servidor em nuvem v4.0.0
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $encoded = (Get-Content ".github/apply-cloud-v4.0.0.patch.gz.b64" -Raw).Trim()
-          $gzipPath = Join-Path $env:RUNNER_TEMP "apply-cloud-v400.patch.gz"
-          $patchPath = Join-Path $env:RUNNER_TEMP "apply-cloud-v400.patch"
-          [IO.File]::WriteAllBytes($gzipPath, [Convert]::FromBase64String($encoded))
-          python -c "import gzip,sys; open(sys.argv[2],'wb').write(gzip.open(sys.argv[1],'rb').read())" "$gzipPath" "$patchPath"
-          git apply --whitespace=nowarn $patchPath
-          git diff --check
-          node --check src/main.js
-          node --check public/mic-noise-worklet.js
-          node --check electron/main.cjs
-          node --check electron/preload.cjs
-
-      - name: Liberar acesso ao Cloudflare v4.0.1
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $encoded = (Get-Content ".github/apply-cloud-csp-v4.0.1.py.gz.b64" -Raw).Trim()
-          $gzipPath = Join-Path $env:RUNNER_TEMP "apply-cloud-csp-v401.py.gz"
-          $scriptPath = Join-Path $env:RUNNER_TEMP "apply-cloud-csp-v401.py"
-          [IO.File]::WriteAllBytes($gzipPath, [Convert]::FromBase64String($encoded))
-          python -c "import gzip,sys; open(sys.argv[2],'wb').write(gzip.open(sys.argv[1],'rb').read())" "$gzipPath" "$scriptPath"
-          python "$scriptPath"
-          git diff --check
-          node --check src/main.js
-
-      - name: Sincronizar foto e banner v4.0.2
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $encoded = (Get-Content ".github/apply-profile-sync-v4.0.2.patch.gz.b64" -Raw).Trim()
-          $gzipPath = Join-Path $env:RUNNER_TEMP "apply-profile-sync-v402.patch.gz"
-          $patchPath = Join-Path $env:RUNNER_TEMP "apply-profile-sync-v402.patch"
-          [IO.File]::WriteAllBytes($gzipPath, [Convert]::FromBase64String($encoded))
-          python -c "import gzip,sys; open(sys.argv[2],'wb').write(gzip.open(sys.argv[1],'rb').read())" "$gzipPath" "$patchPath"
-          git apply --whitespace=nowarn $patchPath
-          git diff --check
-          node --check src/main.js
-
-      - name: Melhorar chat v4.1.0
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $encoded = (Get-Content ".github/apply-chat-v4.1.0.py.gz.b64" -Raw).Trim()
-          $gzipPath = Join-Path $env:RUNNER_TEMP "apply-chat-v410.py.gz"
-          $scriptPath = Join-Path $env:RUNNER_TEMP "apply-chat-v410.py"
-          [IO.File]::WriteAllBytes($gzipPath, [Convert]::FromBase64String($encoded))
-          python -c "import gzip,sys; open(sys.argv[2],'wb').write(gzip.open(sys.argv[1],'rb').read())" "$gzipPath" "$scriptPath"
-          python "$scriptPath"
-          git diff --check
-          node --check src/main.js
-
-      - name: Polir chat v4.1.1
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $encoded = (Get-Content ".github/apply-chat-polish-v4.1.1.patch.gz.b64" -Raw).Trim()
-          $gzipPath = Join-Path $env:RUNNER_TEMP "apply-chat-polish-v411.patch.gz"
-          $patchPath = Join-Path $env:RUNNER_TEMP "apply-chat-polish-v411.patch"
-          [IO.File]::WriteAllBytes($gzipPath, [Convert]::FromBase64String($encoded))
-          python -c "import gzip,sys; open(sys.argv[2],'wb').write(gzip.open(sys.argv[1],'rb').read())" "$gzipPath" "$patchPath"
-          git apply --whitespace=nowarn $patchPath
-          git diff --check
-          node --check src/main.js
-
-      - name: Restaurar sons clássicos do Discord
-        shell: pwsh
-        run: |
-          $path = "src/main.js"
-          $content = Get-Content $path -Raw
-          $content = $content.Replace('voiceLeave: "https://www.myinstants.com/media/sounds/y2mate_VKI8qDn.mp3"', 'voiceLeave: "https://www.myinstants.com/media/sounds/discord-leave-noise.mp3"')
-          $content = $content.Replace('screenStart: null,', 'screenStart: "https://www.myinstants.com/media/sounds/discord-stream-start_7MsfgpB.mp3",')
-          $content = $content.Replace('screenStop: null,', 'screenStop: "https://www.myinstants.com/media/sounds/discord-stream-stop.mp3",')
-          Set-Content -Path $path -Value $content -NoNewline -Encoding utf8
-
-      - name: Aplicar melhorias v4.2.0
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          python ".github/apply-v4.2.0.py"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          git diff --check
-          node --check src/main.js
-          node --check src/v4.2.0.js
-
-      - name: Corrigir mixer 200% v4.2.1
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          python ".github/apply-v4.2.1.py"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          git diff --check
-          node --check src/main.js
-          node --check src/v4.2.0.js
-          $main = Get-Content "src/main.js" -Raw
-          $v42 = Get-Content "src/v4.2.0.js" -Raw
-          if ($v42 -notmatch 'CLEAN_BOOST_MAX = 200') { throw "Mixer não ficou em 200%." }
-          if ($main -notmatch 'createPlaybackLimiter') { throw "Limiter do mixer não foi aplicado." }
-          if ($main -notmatch 'connect\(gain\)\.connect\(limiter\)\.connect\(context\.destination\)') { throw "Rota única do mixer não foi aplicada." }
-
-      - name: Aplicar fullscreen e emojis v4.2.2
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          python ".github/apply-v4.2.2.py"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          git diff --check
-          node --check src/v4.2.2.js
-          $index = Get-Content "index.html" -Raw
-          if ($index -notmatch '/src/v4.2.2.js') { throw "Módulo v4.2.2 não foi injetado." }
-
-      - name: Aplicar janela maximizada e fullscreen real v4.2.3
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          python ".github/apply-v4.2.3.py"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          git diff --check
-          node --check electron/main.cjs
-          node --check electron/preload.cjs
-          node --check src/v4.2.2.js
-          $main = Get-Content "electron/main.cjs" -Raw
-          $preload = Get-Content "electron/preload.cjs" -Raw
-          if ($main -notmatch 'mainWindow\.maximize\(\)') { throw "Abertura maximizada não foi aplicada." }
-          if ($main -notmatch 'setFullScreen\(target\)') { throw "Fullscreen real não foi aplicado." }
-          if ($preload -notmatch 'setWindowFullscreen') { throw "Bridge de fullscreen não foi aplicada." }
-
-      - name: Remover reconexões automáticas v4.2.4
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          python ".github/apply-v4.2.4.py"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          git diff --check
-          node --check src/main.js
-          $main = Get-Content "src/main.js" -Raw
-          if ($main -match 'state\.peer\.reconnect\(\)') { throw "Ainda existe reconnect do PeerJS." }
-          if ($main -match 'connectToHost\(true\)') { throw "Ainda existe reconnect automático com o host." }
-          if ($main -notmatch 'voiceReconnectBlockedPeers') { throw "Bloqueio de reconexão de voz não foi aplicado." }
-          if ($main -notmatch 'screenReconnectBlockedPeers') { throw "Bloqueio de reconexão de tela não foi aplicado." }
-
-      - name: Aplicar polimento visual v4.2.5
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          python ".github/apply-v4.2.5.py"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          git diff --check
-          node --check electron/main.cjs
-          node --check src/v4.2.5.js
-          $main = Get-Content "electron/main.cjs" -Raw
-          $index = Get-Content "index.html" -Raw
-          if ($main -notmatch 'titleBarStyle: "hidden"') { throw "Titlebar integrada não foi aplicada." }
-          if ($main -notmatch 'titleBarOverlay:') { throw "Overlay dos controles da janela não foi aplicado." }
-          if ($index -notmatch '/src/v4.2.5.js') { throw "Módulo visual v4.2.5 não foi injetado." }
-
-      - name: Aplicar titlebar compacta v4.2.6
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          python ".github/apply-v4.2.6.py"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          git diff --check
-          node --check electron/main.cjs
-          node --check electron/preload.cjs
-          node --check src/v4.2.6.js
-          $main = Get-Content "electron/main.cjs" -Raw
-          $preload = Get-Content "electron/preload.cjs" -Raw
-          $index = Get-Content "index.html" -Raw
-          if ($main -notmatch 'frame: false') { throw "Janela frameless não foi aplicada." }
-          if ($main -match 'titleBarOverlay:') { throw "Titlebar nativa antiga ainda está ativa." }
-          if ($main -notmatch 'resenhazinha:window-action') { throw "IPC dos controles da janela não foi aplicado." }
-          if ($preload -notmatch 'windowAction') { throw "Bridge dos controles da janela não foi aplicada." }
-          if ($index -notmatch '/src/v4.2.6.js') { throw "Módulo v4.2.6 não foi injetado." }
-
-      - name: Corrigir inicialização da janela v4.2.7
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          python ".github/apply-v4.2.7.py"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          git diff --check
-          node --check electron/main.cjs
-          $main = Get-Content "electron/main.cjs" -Raw
-          if ($main -match 'mainWindow\.on\("maximize", sendWindowState\);') { throw "Listener prematuro ainda existe." }
-
-      - name: Proteger call contra queda do controle v4.2.8
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          python ".github/apply-v4.2.8.py"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          git diff --check
-          node --check src/main.js
-          $main = Get-Content "src/main.js" -Raw
-          if ($main -notmatch 'function guestHasLiveMedia\(peerId\)') { throw "Detecção de mídia ativa não foi aplicada." }
-          if ($main -notmatch 'if \(guestHasLiveMedia\(peerId\)\)') { throw "removeGuest ainda não protege mídia ativa." }
-          if ($main -notmatch 'Controle do convidado caiu; mídia continua ativa') { throw "Proteção contra queda do controle não foi aplicada." }
-
       - name: Preparar Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
 
-      - name: Preparar Setup e atualização automática
+      - name: Conferir versão declarada
         shell: pwsh
         run: |
-          node -e 'const fs=require("fs"); const p=JSON.parse(fs.readFileSync("package.json","utf8")); p.version=process.env.APP_VERSION; p.main="electron/bootstrap.cjs"; p.scripts["package:win"]="npm run build && electron-builder --win nsis --x64 --publish never"; p.dependencies={...(p.dependencies||{}),"electron-updater":"6.8.9"}; p.devDependencies={...(p.devDependencies||{}),"electron-builder":"26.16.0"}; p.build={appId:"com.yazzdyz.resenhazinha",productName:"Resenhazinha",asar:true,npmRebuild:false,directories:{output:"release"},files:["dist/**/*","electron/**/*","public/**/*","package.json","!src/**/*","!release/**/*","!.github/**/*","!upload/**/*","!*.zip"],extraResources:[{from:"node_modules/loopback-capture/build/Release/loopback_capture_addon.node",to:"loopback_capture_addon.node"},{from:"THIRD_PARTY_NOTICES.txt",to:"THIRD_PARTY_NOTICES.txt"}],win:{target:[{target:"nsis",arch:["x64"]}],icon:"public/icon.ico",artifactName:"Resenhazinha-Setup-${version}.${ext}"},nsis:{oneClick:false,allowToChangeInstallationDirectory:true,createDesktopShortcut:"always",createStartMenuShortcut:true,shortcutName:"Resenhazinha",runAfterFinish:true,deleteAppDataOnUninstall:false},publish:[{provider:"github",owner:"Yazzdyz",repo:"Resenhazinha-DC-2.0",releaseType:"release",tagNamePrefix:"v"}]}; fs.writeFileSync("package.json",JSON.stringify(p,null,2)+"\n");'
+          $packageVersion = node -p "require('./package.json').version"
+          if ($packageVersion -ne $env:APP_VERSION) {
+            throw "package.json ($packageVersion) e APP_VERSION ($env:APP_VERSION) estão diferentes."
+          }
+
+      - name: Instalar dependências reproduzíveis
+        run: npm ci
+
+      - name: Validar sessões de call e bundle
+        run: npm run check
+
+      - name: Montar Setup do Windows
+        run: npm run package:win
 
       - name: Garantir tag da versão
         shell: pwsh
         run: |
           $tag = "v$env:APP_VERSION"
           git fetch --tags --force
-          $existing = git tag --list $tag
-          if (-not $existing) {
+          if (-not (git tag --list $tag)) {
             git tag $tag $env:GITHUB_SHA
             git push origin $tag
           }
-
-      - name: Instalar dependências
-        run: npm install
-
-      - name: Montar Setup do Windows
-        run: npm run package:win
 
       - name: Publicar arquivos da atualização
         shell: pwsh
@@ -336,7 +67,7 @@ jobs:
           $tag = "v$env:APP_VERSION"
           gh release view $tag --repo "${{ github.repository }}" *> $null
           if ($LASTEXITCODE -ne 0) {
-            gh release create $tag --repo "${{ github.repository }}" --target $env:GITHUB_SHA --title "Resenhazinha $tag"
+            gh release create $tag --repo "${{ github.repository }}" --target $env:GITHUB_SHA --title "Resenhazinha $tag" --notes "Call reconstruída: identidade única por usuário, voz estável e compartilhamento de tela com áudio isolado."
           }
           gh release upload $tag `
             "release/Resenhazinha-Setup-$env:APP_VERSION.exe" `

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; connect-src 'self' https://0.peerjs.com wss://0.peerjs.com http://127.0.0.1:* ws://127.0.0.1:*; img-src 'self' data: blob:; media-src 'self' blob: https://www.myinstants.com; style-src 'self' 'unsafe-inline'; script-src 'self';"
+      content="default-src 'self'; connect-src 'self' https://0.peerjs.com wss://0.peerjs.com https://resenhazinha-server.guilhermekrull1227.workers.dev wss://resenhazinha-server.guilhermekrull1227.workers.dev http://127.0.0.1:* ws://127.0.0.1:*; img-src 'self' data: blob:; media-src 'self' blob: https://www.myinstants.com; style-src 'self' 'unsafe-inline'; script-src 'self';"
     />
     <meta name="description" content="Mini servidor com chat, call, cargos e compartilhamento de tela entre amigos." />
     <title>Resenhazinha</title>
@@ -52,7 +52,7 @@
             <label id="room-code-label">
               <span>Código do servidor <small>(só na primeira vez)</small></span>
               <div class="room-code-field">
-                <input id="room-input" maxlength="8" autocomplete="off" spellcheck="false" placeholder="Ex: K7M4P2" />
+                <input id="room-input" maxlength="15" autocomplete="off" spellcheck="false" placeholder="Ex: K7M4P2" />
                 <button type="button" class="icon-button icon-button--inside" id="random-code-button" aria-label="Gerar outro código" title="Gerar código">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7h-4V3M4 17h4v4M5.1 9A7 7 0 0 1 16 5.1L20 9M4 15l4 3.9A7 7 0 0 0 18.9 15"/></svg>
                 </button>
@@ -89,9 +89,6 @@
               <span class="server-dot" id="server-icon-display">R</span>
               <strong id="server-name-display">Resenhazinha</strong>
             </div>
-            <button class="icon-button server-settings-button" id="server-settings-button" aria-label="Configurações do servidor" title="Configurações do servidor" hidden>
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21h-4v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3.1 14H3v-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1-1.5V3h4v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.5 1h.1v4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>
-            </button>
           </div>
 
           <div class="sidebar-scroll">
@@ -100,7 +97,7 @@
                 <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3"/></svg>
                 <span>Convite <strong id="room-code-display">------</strong></span>
               </button>
-              <span class="connection-pill" id="connection-pill"><i></i> Conectado</span>
+              <span class="connection-pill" id="connection-pill" hidden><i></i> Conectado</span>
             </div>
 
             <div class="channel-section">
@@ -126,10 +123,21 @@
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18 6a8.5 8.5 0 0 1 0 12"/></svg>
                 </span>
                 <span id="voice-channel-name">Call</span>
+                <time class="voice-channel-duration" id="voice-channel-duration" hidden>0:00</time>
               </button>
               <div class="voice-mini-list" id="voice-mini-list"></div>
               <p class="channel-empty-label" id="voice-channel-empty" hidden>Nenhum canal de voz</p>
             </div>
+          </div>
+
+          <div class="voice-connection-panel" id="voice-connection-panel" hidden>
+            <div class="voice-connection-copy">
+              <strong>Voz conectada</strong>
+              <span id="voice-connection-detail">call / Resenhazinha</span>
+            </div>
+            <span class="voice-ping-indicator" id="voice-ping-indicator" data-quality="unknown" title="Aguardando medição de ping" aria-label="Qualidade da conexão">
+              <i></i><i></i><i></i>
+            </span>
           </div>
 
           <div class="sidebar-user">
@@ -172,12 +180,16 @@
               </div>
             </div>
             <div class="content-header-actions">
+              <button class="header-action header-action--icon" id="pinned-messages-button" type="button" aria-label="Mensagens fixadas" title="Mensagens fixadas">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 4 6 6-3 2-3 5-2 3-2-5-5-3 2-3 5-3 2-2Z"/><path d="m9 15-5 5"/></svg>
+                <em id="pinned-count-badge" hidden>0</em>
+              </button>
+              <button class="header-action header-action--icon" id="diagnostics-button" type="button" aria-label="Diagnóstico da conexão" title="Diagnóstico">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V9M9 19V5M14 19v-7M19 19V3"/></svg>
+              </button>
               <button class="header-action" id="chat-toggle-button" type="button" aria-label="Abrir chat" hidden>
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4v8Z"/><path d="M8 9h8M8 13h5"/></svg>
                 <span>Abrir chat</span>
-              </button>
-              <button class="header-action" id="header-settings-button" type="button" aria-label="Editar servidor" hidden>
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21h-4v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3.1 14H3v-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1-1.5V3h4v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.5 1h.1v4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>
               </button>
             </div>
           </header>
@@ -189,6 +201,10 @@
                 <strong>A conversa começa aqui</strong>
                 <p>Manda alguma coisa para a galera.</p>
               </div>
+            </div>
+            <div class="chat-reply-preview" id="chat-reply-preview" hidden>
+              <div><small>RESPONDENDO A <strong id="chat-reply-name">alguém</strong></small><p id="chat-reply-text"></p></div>
+              <button type="button" id="chat-reply-cancel" aria-label="Cancelar resposta">×</button>
             </div>
             <div class="chat-pending-files" id="chat-pending-files" hidden></div>
             <div class="mention-menu" id="mention-menu" hidden role="listbox" aria-label="Menções"></div>
@@ -231,7 +247,7 @@
                       <svg class="screen-audio-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4V5ZM16 9l5 5M21 9l-5 5"/></svg>
                       <span id="screen-audio-label">Som da tela</span>
                     </button>
-                    <input class="audio-volume-range" id="screen-volume-range" type="range" min="0" max="100" value="100" step="1" aria-label="Volume da transmissão" />
+                    <input class="audio-volume-range" id="screen-volume-range" type="range" min="0" max="200" value="100" step="1" aria-label="Volume da transmissão" />
                     <span class="audio-volume-value" id="screen-volume-value">100%</span>
                   </div>
                 </div>
@@ -240,14 +256,25 @@
 
             <div class="call-footer discord-call-footer">
               <p class="call-hint" id="call-hint">Entre na call para conversar.</p>
-              <div class="control-bar">
+              <div class="control-bar control-bar--discord">
                 <button class="control-button control-button--join" id="voice-join-button" type="button" aria-label="Entrar na call" data-tooltip="Entrar na call" hidden>
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="M17 8v8M13 12h8"/></svg>
+                </button>
+                <button class="control-button" id="call-mic-button" type="button" aria-label="Desligar microfone" data-tooltip="Microfone">
+                  <svg class="icon-on" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v4M8 21h8"/></svg>
+                  <svg class="icon-off" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 3 18 18M9 9v1a3 3 0 0 0 5.1 2.1M15 7V5a3 3 0 0 0-5.8-1M5 10a7 7 0 0 0 11.9 5M19 10a7 7 0 0 1-.4 2.3M12 17v4M8 21h8"/></svg>
+                </button>
+                <button class="control-button control-button--camera" id="camera-button" type="button" aria-label="Ligar câmera" data-tooltip="Câmera">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="m16 10 5-3v10l-5-3v-4Z"/></svg>
                 </button>
                 <button class="control-button control-button--share" id="share-button" aria-label="Compartilhar tela" data-tooltip="Compartilhar tela">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4M9 10l3-3 3 3M12 7v6"/></svg>
                 </button>
-                <button class="control-button" id="voice-leave-button" type="button" aria-label="Sair da call" data-tooltip="Sair da call">
+                <button class="control-button" id="call-deafen-button" type="button" aria-label="Desativar áudio da call" data-tooltip="Desativar áudio">
+                  <svg class="icon-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 14v-2a8 8 0 0 1 16 0v2"/><path d="M18 19h1a2 2 0 0 0 2-2v-3h-3v5ZM6 19H5a2 2 0 0 1-2-2v-3h3v5Z"/></svg>
+                  <svg class="icon-off" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 3 18 18M4 14v-2a8 8 0 0 1 2-5.3M9.7 4.3A8 8 0 0 1 20 12v2M18 18v1h1a2 2 0 0 0 2-2v-3h-3v1M6 15v4H5a2 2 0 0 1-2-2v-3h3"/></svg>
+                </button>
+                <button class="control-button control-button--leave" id="voice-leave-button" type="button" aria-label="Sair da call" data-tooltip="Sair da call">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 12a15 15 0 0 1 11 0l1.5-2.5c.4-.7.2-1.6-.5-2A14 14 0 0 0 5.5 7.5c-.7.4-.9 1.3-.5 2L6.5 12Z"/><path d="M8 11v4M16 11v4"/></svg>
                 </button>
               </div>
@@ -310,205 +337,242 @@
       <div id="audio-container" aria-hidden="true"></div>
       <div class="toast-region" id="toast-region" aria-live="polite"></div>
 
-      <dialog class="admin-dialog" id="server-dialog">
-        <div class="admin-dialog-header">
+      <dialog class="admin-dialog server-settings-dialog server-settings-dialog--sectioned" id="server-dialog">
+        <div class="admin-dialog-header user-settings-header">
           <div>
-            <span class="eyebrow">CONFIGURAÇÕES</span>
-            <h2>Servidor</h2>
+            <span class="eyebrow">CONFIGURAÇÕES DO SERVIDOR</span>
+            <h2 id="server-settings-page-title">Geral</h2>
           </div>
-          <button class="icon-button" id="close-server-dialog-button" aria-label="Fechar configurações">
+          <button class="icon-button" id="close-server-dialog-button" aria-label="Fechar configurações do servidor">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
           </button>
         </div>
-        <div class="admin-dialog-body">
-          <section class="settings-section">
-            <h3>Geral</h3>
-            <div class="server-icon-settings-row">
-              <span class="server-icon-preview" id="server-icon-preview">R</span>
-              <div class="server-icon-settings-copy">
-                <strong>Foto do servidor</strong>
-                <span>Use uma imagem quadrada. Ela fica salva junto com o servidor.</span>
-              </div>
-              <div class="server-icon-settings-actions">
-                <button class="mini-button" id="choose-server-icon-button" type="button">Trocar foto</button>
-                <button class="mini-button mini-button--danger" id="remove-server-icon-button" type="button" hidden>Remover</button>
-              </div>
-            </div>
-            <label class="settings-field">
-              <span>Nome do servidor</span>
-              <input id="server-name-settings" maxlength="28" />
-            </label>
-            <button class="button button--secondary settings-save" id="save-server-name-button" type="button">Salvar nome</button>
-          </section>
 
-          <section class="settings-section">
-            <h3>Canais <small>máximo 1 de cada</small></h3>
-            <div class="channel-setting-row" id="text-channel-setting-row">
-              <span class="settings-channel-icon">#</span>
-              <input id="text-channel-settings" maxlength="24" placeholder="chat-principal" />
-              <button class="mini-button" id="save-text-channel-button" type="button">Salvar</button>
-              <button class="mini-button mini-button--danger" id="delete-text-channel-button" type="button">Excluir</button>
-            </div>
-            <button class="button button--secondary" id="create-text-channel-settings-button" type="button" hidden>Criar canal de texto</button>
+        <div class="user-settings-layout server-settings-layout">
+          <aside class="user-settings-nav server-settings-nav" aria-label="Seções das configurações do servidor">
+            <button class="user-settings-nav-item is-active" type="button" data-server-settings-tab="general">
+              <span class="user-settings-nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M18 6h2M10 12h10M4 12h2M4 18h6M14 18h6"/><circle cx="16" cy="6" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="12" cy="18" r="2"/></svg></span><span>Geral</span>
+            </button>
+            <button class="user-settings-nav-item" type="button" data-server-settings-tab="channels">
+              <span class="user-settings-nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3 7 21M17 3l-2 18M4 9h16M3 15h16"/></svg></span><span>Canais</span>
+            </button>
+            <button class="user-settings-nav-item" type="button" data-server-settings-tab="invite">
+              <span class="user-settings-nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.1.1l2-2a5 5 0 0 0-7.1-7.1l-1.2 1.2"/><path d="M14 11a5 5 0 0 0-7.1-.1l-2 2A5 5 0 0 0 12 20l1.2-1.2"/></svg></span><span>Convite</span>
+            </button>
+            <button class="user-settings-nav-item" type="button" data-server-settings-tab="roles">
+              <span class="user-settings-nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 20 7v5c0 5-3.4 8-8 9-4.6-1-8-4-8-9V7l8-4Z"/><path d="M9 12.5 11 14.5 15.5 10"/></svg></span><span>Cargos</span>
+            </button>
+            <button class="user-settings-nav-item" type="button" data-server-settings-tab="moderation">
+              <span class="user-settings-nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h12v16H6z"/><path d="M9 8h6M9 12h6M9 16h4"/></svg></span><span>Moderação</span>
+            </button>
+          </aside>
 
-            <div class="channel-setting-row" id="voice-channel-setting-row">
-              <span class="settings-channel-icon">🔊</span>
-              <input id="voice-channel-settings" maxlength="24" placeholder="Call" />
-              <button class="mini-button" id="save-voice-channel-button" type="button">Salvar</button>
-              <button class="mini-button mini-button--danger" id="delete-voice-channel-button" type="button">Excluir</button>
-            </div>
-            <button class="button button--secondary" id="create-voice-channel-settings-button" type="button" hidden>Criar canal de voz</button>
-          </section>
+          <div class="user-settings-content server-settings-content">
+            <div class="admin-dialog-body user-settings-pages server-settings-pages">
+              <section class="settings-section user-settings-page is-active" data-server-settings-page="general">
+                <div class="settings-section-title"><div><h3>Geral</h3><p>Nome e imagem que identificam o servidor para todo mundo.</p></div></div>
+                <div class="server-icon-settings-row">
+                  <span class="server-icon-preview" id="server-icon-preview">R</span>
+                  <div class="server-icon-settings-copy">
+                    <strong>Foto do servidor</strong>
+                    <span>Use uma imagem quadrada. Ela fica salva junto com o servidor.</span>
+                  </div>
+                  <div class="server-icon-settings-actions">
+                    <button class="mini-button" id="choose-server-icon-button" type="button">Trocar foto</button>
+                    <button class="mini-button mini-button--danger" id="remove-server-icon-button" type="button" hidden>Remover</button>
+                  </div>
+                </div>
+                <label class="settings-field"><span>Nome do servidor</span><input id="server-name-settings" maxlength="28" /></label>
+                <button class="button button--secondary settings-save" id="save-server-name-button" type="button">Salvar nome</button>
+              </section>
 
-          <section class="settings-section">
-            <div class="settings-section-title">
-              <div>
-                <h3>Cargos</h3>
-                <p>Cargos podem ser só visuais ou ter permissão de administrador.</p>
-              </div>
+              <section class="settings-section user-settings-page" data-server-settings-page="channels" hidden>
+                <div class="settings-section-title"><div><h3>Canais</h3><p>Organize o canal de texto e a call do servidor.</p></div><small>máximo 1 de cada</small></div>
+                <div class="channel-setting-row" id="text-channel-setting-row">
+                  <span class="settings-channel-icon">#</span>
+                  <input id="text-channel-settings" maxlength="24" placeholder="chat-principal" />
+                  <button class="mini-button" id="save-text-channel-button" type="button">Salvar</button>
+                  <button class="mini-button mini-button--danger" id="delete-text-channel-button" type="button">Excluir</button>
+                </div>
+                <button class="button button--secondary" id="create-text-channel-settings-button" type="button" hidden>Criar canal de texto</button>
+                <div class="channel-setting-row" id="voice-channel-setting-row">
+                  <span class="settings-channel-icon">🔊</span>
+                  <input id="voice-channel-settings" maxlength="24" placeholder="Call" />
+                  <button class="mini-button" id="save-voice-channel-button" type="button">Salvar</button>
+                  <button class="mini-button mini-button--danger" id="delete-voice-channel-button" type="button">Excluir</button>
+                </div>
+                <button class="button button--secondary" id="create-voice-channel-settings-button" type="button" hidden>Criar canal de voz</button>
+              </section>
+
+              <section class="settings-section user-settings-page" id="invite-settings-section" data-server-settings-page="invite" hidden>
+                <div class="settings-section-title"><div><h3>Convite do servidor</h3><p>Gerar um convite novo invalida o código antigo para quem ainda não faz parte. Quem já entrou continua reconectando normalmente.</p></div></div>
+                <div class="invite-settings-row">
+                  <code id="invite-code-settings">------</code>
+                  <button class="mini-button" id="copy-invite-settings-button" type="button">Copiar</button>
+                  <button class="mini-button mini-button--danger" id="rotate-invite-button" type="button">Gerar novo</button>
+                </div>
+              </section>
+
+              <section class="settings-section user-settings-page" data-server-settings-page="roles" hidden>
+                <div class="settings-section-title"><div><h3>Cargos</h3><p>Cargos podem ser só visuais ou ter permissão de administrador.</p></div></div>
+                <div class="role-list" id="role-list"></div>
+                <div class="role-create-row">
+                  <input id="role-name-input" maxlength="20" placeholder="Nome do cargo" />
+                  <input id="role-color-input" type="color" value="#7c6df2" aria-label="Cor do cargo" />
+                  <label class="admin-check"><input id="role-admin-input" type="checkbox" /> <span>ADM</span></label>
+                  <button class="mini-button" id="create-role-button" type="button">Criar cargo</button>
+                </div>
+              </section>
+
+              <section class="settings-section user-settings-page" id="moderation-log-section" data-server-settings-page="moderation" hidden>
+                <div class="settings-section-title"><div><h3>Registro de moderação</h3><p>As últimas ações de Owner e ADM ficam salvas para facilitar descobrir quem fez cada alteração.</p></div></div>
+                <div class="moderation-log" id="moderation-log"></div>
+              </section>
             </div>
-            <div class="role-list" id="role-list"></div>
-            <div class="role-create-row">
-              <input id="role-name-input" maxlength="20" placeholder="Nome do cargo" />
-              <input id="role-color-input" type="color" value="#7c6df2" aria-label="Cor do cargo" />
-              <label class="admin-check"><input id="role-admin-input" type="checkbox" /> <span>ADM</span></label>
-              <button class="mini-button" id="create-role-button" type="button">Criar cargo</button>
-            </div>
-          </section>
+          </div>
         </div>
       </dialog>
 
-      <dialog class="admin-dialog user-settings-dialog" id="user-dialog">
-        <div class="admin-dialog-header">
+      <dialog class="admin-dialog user-settings-dialog user-settings-dialog--sectioned" id="user-dialog">
+        <div class="admin-dialog-header user-settings-header">
           <div>
             <span class="eyebrow">CONFIGURAÇÕES</span>
-            <h2>Seu perfil e áudio</h2>
+            <h2 id="user-settings-page-title">Perfil</h2>
           </div>
           <button class="icon-button" id="close-user-dialog-button" aria-label="Fechar configurações do usuário">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
           </button>
         </div>
-        <div class="admin-dialog-body">
-          <section class="settings-section">
-            <h3>Perfil</h3>
-            <div class="user-banner-editor">
-              <div class="user-banner-preview" id="user-banner-preview">
-                <span class="user-banner-preview-label">GIF ou PNG/JPG</span>
-              </div>
-              <div class="user-profile-settings-actions user-profile-settings-actions--banner">
-                <button class="mini-button" id="user-choose-banner-button" type="button">Trocar banner</button>
-                <button class="mini-button mini-button--danger" id="user-remove-banner-button" type="button" hidden>Remover banner</button>
-              </div>
-            </div>
-            <div class="user-profile-settings-row user-profile-settings-row--avatar">
-              <span class="avatar user-settings-avatar user-settings-avatar--floating" id="user-avatar-preview">G</span>
-              <div class="user-profile-settings-actions">
-                <button class="mini-button" id="user-choose-avatar-button" type="button">Trocar foto</button>
-                <button class="mini-button mini-button--danger" id="user-remove-avatar-button" type="button" hidden>Remover foto</button>
-              </div>
-            </div>
-            <label class="settings-field">
-              <span>Seu nome</span>
-              <input id="user-name-settings" maxlength="20" autocomplete="nickname" />
-            </label>
-            <label class="settings-field">
-              <span>Bio</span>
-              <textarea id="user-bio-settings" maxlength="190" rows="4" placeholder="Escreve algo sobre você, seu humor, seu jogo do momento..."></textarea>
-            </label>
-          </section>
 
-          <section class="settings-section appearance-settings-section">
-            <div class="settings-section-title">
-              <div>
-                <h3>Aparência</h3>
-                <p>Esse fundo é só seu. Pode usar GIF ou imagem normal sem mudar o visual dos seus amigos.</p>
-              </div>
+        <div class="user-settings-layout">
+          <aside class="user-settings-nav" aria-label="Seções das configurações">
+            <button class="user-settings-nav-item is-active" type="button" data-user-settings-tab="profile">
+              <span class="user-settings-nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/></svg></span><span>Perfil</span>
+            </button>
+            <button class="user-settings-nav-item" type="button" data-user-settings-tab="audio">
+              <span class="user-settings-nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 14v-2a8 8 0 0 1 16 0v2"/><path d="M18 19h1a2 2 0 0 0 2-2v-3h-3v5ZM6 19H5a2 2 0 0 1-2-2v-3h3v5Z"/></svg></span><span>Áudio</span>
+            </button>
+            <button class="user-settings-nav-item" type="button" data-user-settings-tab="background">
+              <span class="user-settings-nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m5 18 5-5 3 3 2-2 4 4"/></svg></span><span>Fundo</span>
+            </button>
+
+            <div class="user-settings-nav-spacer"></div>
+            <div class="user-settings-version-card">
+              <strong>Resenhazinha <span id="app-version-label">v3.2.0</span></strong>
+              <span id="update-status-label">Atualizações automáticas pelo GitHub Releases.</span>
+              <button class="mini-button" id="check-update-button" type="button">Verificar atualização</button>
             </div>
-            <div class="theme-picker" role="group" aria-label="Tema do Resenhazinha">
-              <button class="theme-choice" type="button" data-theme-choice="light">
-                <span class="theme-choice-preview theme-choice-preview--light"><i></i><i></i><i></i></span>
-                <strong>Claro</strong>
-              </button>
-              <button class="theme-choice" type="button" data-theme-choice="dark">
-                <span class="theme-choice-preview theme-choice-preview--dark"><i></i><i></i><i></i></span>
-                <strong>Escuro</strong>
-              </button>
-              <button class="theme-choice" type="button" data-theme-choice="ultra-dark">
-                <span class="theme-choice-preview theme-choice-preview--ultra"><i></i><i></i><i></i></span>
-                <strong>Ultra escuro</strong>
-              </button>
-            </div>
-            <div class="app-background-preview-shell">
-              <div class="app-background-preview" id="app-background-preview"></div>
-              <span class="app-background-preview-label">Prévia do fundo</span>
-            </div>
-            <div class="appearance-actions-row">
-              <button class="mini-button" id="choose-app-background-button" type="button">Escolher GIF ou imagem</button>
-              <button class="mini-button mini-button--danger" id="remove-app-background-button" type="button" hidden>Usar fundo padrão</button>
-            </div>
-            <label class="settings-field appearance-blur-field">
-              <span>Desfoque do fundo <strong id="app-background-blur-value">8 px</strong></span>
-              <input id="app-background-blur-range" type="range" min="0" max="30" step="1" value="8" aria-label="Desfoque do fundo" />
-            </label>
-            <label class="settings-field appearance-blur-field">
-              <span>Zoom do fundo <strong id="app-background-zoom-value">100%</strong></span>
-              <input id="app-background-zoom-range" type="range" min="85" max="160" step="5" value="100" aria-label="Zoom do fundo" />
-            </label>
-            <div class="font-size-setting">
-              <label class="settings-field appearance-blur-field">
-                <span>Tamanho da fonte <strong id="app-font-scale-value">100%</strong></span>
-                <input id="app-font-scale-range" type="range" min="85" max="130" step="5" value="100" aria-label="Tamanho da fonte do Resenhazinha" />
-              </label>
-              <div class="font-size-preview" id="font-size-preview">
-                <span class="avatar font-size-preview-avatar">R</span>
-                <div>
-                  <strong>Resenhazinha</strong>
-                  <p>Assim suas mensagens e menus vão aparecer.</p>
+          </aside>
+
+          <div class="user-settings-content">
+            <div class="admin-dialog-body user-settings-pages">
+              <section class="settings-section user-settings-page is-active" data-user-settings-page="profile">
+                <div class="settings-section-title">
+                  <div><h3>Perfil</h3><p>Foto, banner, nome e bio que seus amigos veem no servidor.</p></div>
                 </div>
-              </div>
-            </div>
-          </section>
+                <div class="user-banner-editor">
+                  <div class="user-banner-preview" id="user-banner-preview">
+                    <span class="user-banner-preview-label">GIF ou PNG/JPG</span>
+                  </div>
+                  <div class="user-profile-settings-actions user-profile-settings-actions--banner">
+                    <button class="mini-button" id="user-choose-banner-button" type="button">Trocar banner</button>
+                    <button class="mini-button mini-button--danger" id="user-remove-banner-button" type="button" hidden>Remover banner</button>
+                  </div>
+                </div>
+                <div class="user-profile-settings-row user-profile-settings-row--avatar">
+                  <span class="avatar user-settings-avatar user-settings-avatar--floating" id="user-avatar-preview">G</span>
+                  <div class="user-profile-settings-actions">
+                    <button class="mini-button" id="user-choose-avatar-button" type="button">Trocar foto</button>
+                    <button class="mini-button mini-button--danger" id="user-remove-avatar-button" type="button" hidden>Remover foto</button>
+                  </div>
+                </div>
+                <label class="settings-field"><span>Seu nome</span><input id="user-name-settings" maxlength="20" autocomplete="nickname" /></label>
+                <label class="settings-field"><span>Bio</span><textarea id="user-bio-settings" maxlength="190" rows="4" placeholder="Escreve algo sobre você, seu humor, seu jogo do momento..."></textarea></label>
+              </section>
 
-          <section class="settings-section">
-            <div class="settings-section-title">
-              <div>
-                <h3>Microfone</h3>
-                <p>Escolha o dispositivo e o nível de supressão. Se você estiver na call, a alteração é aplicada sem precisar sair.</p>
-              </div>
-            </div>
-            <label class="settings-field">
-              <span>Dispositivo de entrada</span>
-              <div class="microphone-select-row">
-                <select id="microphone-device-select" aria-label="Microfone"></select>
-                <button class="mini-button" id="refresh-microphones-button" type="button">Atualizar</button>
-              </div>
-            </label>
-            <label class="settings-field">
-              <span>Supressão de ruído</span>
-              <select id="noise-suppression-select" aria-label="Supressão de ruído">
-                <option value="off">Desligada</option>
-                <option value="light">Leve</option>
-                <option value="medium" selected>Média</option>
-                <option value="high">Alta</option>
-              </select>
-            </label>
-            <div class="noise-level-note" id="noise-level-note">Média usa a supressão nativa do microfone e um filtro adicional para reduzir ruído quando você não está falando.</div>
-          </section>
+              <section class="settings-section voice-settings-section user-settings-page" data-user-settings-page="audio" hidden>
+                <div class="settings-section-title voice-settings-heading">
+                  <div><h3>Áudio</h3><p>Escolha por onde você fala e escuta, teste o microfone e ajuste a supressão de ruído.</p></div>
+                  <button class="mini-button" id="refresh-microphones-button" type="button">Atualizar dispositivos</button>
+                </div>
+                <div class="voice-device-grid">
+                  <label class="settings-field voice-device-field"><span>Microfone</span><select id="microphone-device-select" aria-label="Microfone"></select></label>
+                  <label class="settings-field voice-device-field"><span>Alto-falante</span><select id="speaker-device-select" aria-label="Alto-falante"></select></label>
+                </div>
+                <div class="voice-volume-grid">
+                  <label class="settings-field voice-volume-field">
+                    <span>Volume do microfone <strong id="microphone-input-volume-value">100%</strong></span>
+                    <input id="microphone-input-volume-range" type="range" min="0" max="100" value="100" step="1" aria-label="Volume do microfone" />
+                  </label>
+                  <label class="settings-field voice-volume-field">
+                    <span>Volume do alto-falante <strong id="output-volume-value">100%</strong></span>
+                    <input id="output-volume-range" type="range" min="0" max="200" value="100" step="1" aria-label="Volume do alto-falante" />
+                  </label>
+                </div>
+                <div class="microphone-test-row microphone-test-row--monitor">
+                  <button class="button button--secondary microphone-test-button" id="microphone-test-button" type="button">Testar microfone</button>
+                  <div class="microphone-test-visual">
+                    <div class="microphone-test-meter" id="microphone-test-meter" aria-label="Nível do microfone"></div>
+                    <small id="microphone-test-status">Ao testar, a call fica muda para você e sua voz volta pelo alto-falante escolhido.</small>
+                  </div>
+                </div>
+                <div class="voice-settings-divider"></div>
+                <label class="settings-field">
+                  <span>Supressão de ruído</span>
+                  <select id="noise-suppression-select" aria-label="Supressão de ruído">
+                    <option value="off">Desligada</option>
+                    <option value="light">Leve</option>
+                    <option value="medium" selected>Média</option>
+                    <option value="high">Alta</option>
+                  </select>
+                </label>
+                <div class="noise-level-note" id="noise-level-note">Média combina a supressão nativa com um filtro adaptativo para reduzir ruídos constantes.</div>
+              </section>
 
-          <button class="button button--primary user-settings-save" id="save-user-settings-button" type="button">Salvar configurações</button>
+              <section class="settings-section appearance-settings-section user-settings-page" data-user-settings-page="background" hidden>
+                <div class="settings-section-title">
+                  <div><h3>Fundo</h3><p>Personalize o visual só no seu Resenhazinha. GIFs e imagens ficam locais no seu PC.</p></div>
+                </div>
+                <div class="theme-picker" role="group" aria-label="Tema do Resenhazinha">
+                  <button class="theme-choice" type="button" data-theme-choice="light"><span class="theme-choice-preview theme-choice-preview--light"><i></i><i></i><i></i></span><strong>Claro</strong></button>
+                  <button class="theme-choice" type="button" data-theme-choice="dark"><span class="theme-choice-preview theme-choice-preview--dark"><i></i><i></i><i></i></span><strong>Escuro</strong></button>
+                  <button class="theme-choice" type="button" data-theme-choice="ultra-dark"><span class="theme-choice-preview theme-choice-preview--ultra"><i></i><i></i><i></i></span><strong>Ultra escuro</strong></button>
+                </div>
+                <div class="app-background-preview-shell"><div class="app-background-preview" id="app-background-preview"></div><span class="app-background-preview-label">Prévia do fundo</span></div>
+                <div class="appearance-actions-row">
+                  <button class="mini-button" id="choose-app-background-button" type="button">Escolher GIF ou imagem</button>
+                  <button class="mini-button mini-button--danger" id="remove-app-background-button" type="button" hidden>Usar fundo padrão</button>
+                </div>
+                <label class="settings-field appearance-blur-field"><span>Desfoque do fundo <strong id="app-background-blur-value">8 px</strong></span><input id="app-background-blur-range" type="range" min="0" max="30" step="1" value="8" aria-label="Desfoque do fundo" /></label>
+                <label class="settings-field appearance-blur-field"><span>Zoom do fundo <strong id="app-background-zoom-value">100%</strong></span><input id="app-background-zoom-range" type="range" min="85" max="160" step="5" value="100" aria-label="Zoom do fundo" /></label>
+                <div class="font-size-setting">
+                  <label class="settings-field appearance-blur-field"><span>Tamanho da fonte <strong id="app-font-scale-value">100%</strong></span><input id="app-font-scale-range" type="range" min="85" max="130" step="5" value="100" aria-label="Tamanho da fonte do Resenhazinha" /></label>
+                  <div class="font-size-preview" id="font-size-preview"><span class="avatar font-size-preview-avatar">R</span><div><strong>Resenhazinha</strong><p>Assim suas mensagens e menus vão aparecer.</p></div></div>
+                </div>
+              </section>
+            </div>
+            <div class="user-settings-actions-bar"><button class="button button--primary user-settings-save" id="save-user-settings-button" type="button">Salvar configurações</button></div>
+          </div>
         </div>
       </dialog>
 
       <div class="voice-context-menu" id="voice-context-menu" hidden role="menu" aria-label="Opções da pessoa">
         <button class="voice-context-item" id="voice-context-profile-button" type="button" role="menuitem">Perfil</button>
         <button class="voice-context-item" id="voice-context-mention-button" type="button" role="menuitem">Mencionar</button>
+        <section class="voice-context-message" id="voice-context-message-section" hidden>
+          <div class="voice-context-divider"></div>
+          <button class="voice-context-item" id="voice-context-reply-button" type="button" role="menuitem">Responder</button>
+          <button class="voice-context-item" id="voice-context-pin-button" type="button" role="menuitem">Fixar mensagem</button>
+          <button class="voice-context-item voice-context-item--danger" id="voice-context-delete-button" type="button" role="menuitem">Apagar mensagem</button>
+          <div class="voice-context-reactions" id="voice-context-reactions" aria-label="Reações rápidas"></div>
+        </section>
         <div class="voice-context-divider"></div>
         <section class="voice-context-volume" id="voice-context-volume-section">
           <div class="voice-context-volume-heading">
             <span>Volume do microfone</span>
             <strong id="voice-context-volume-value">100%</strong>
           </div>
-          <input class="voice-context-volume-range" id="voice-context-volume-range" type="range" min="0" max="100" value="100" step="1" aria-label="Volume local do microfone desta pessoa" />
+          <input class="voice-context-volume-range" id="voice-context-volume-range" type="range" min="0" max="200" value="100" step="1" aria-label="Volume local do microfone desta pessoa" />
           <button class="voice-context-item voice-context-check-item" id="voice-context-local-mute-button" type="button" role="menuitemcheckbox" aria-pressed="false">
             <span class="voice-context-check"></span>
             <em>Silenciar localmente</em>
@@ -545,7 +609,7 @@
             </div>
             <div class="member-volume-row">
               <span class="member-volume-icon">🔊</span>
-              <input class="audio-volume-range" id="member-volume-range" type="range" min="0" max="100" value="100" step="1" aria-label="Volume deste membro" />
+              <input class="audio-volume-range" id="member-volume-range" type="range" min="0" max="200" value="100" step="1" aria-label="Volume deste membro" />
               <strong class="audio-volume-value" id="member-volume-value">100%</strong>
             </div>
           </section>
@@ -561,6 +625,26 @@
             <h3>Cargos do membro</h3>
             <div class="member-role-options" id="member-role-options"></div>
           </section>
+        </div>
+      </dialog>
+
+      <dialog class="admin-dialog pinned-dialog" id="pinned-dialog">
+        <div class="admin-dialog-header">
+          <div><span class="eyebrow">CANAL DE TEXTO</span><h2>Mensagens fixadas</h2></div>
+          <button class="icon-button" id="close-pinned-dialog-button" aria-label="Fechar mensagens fixadas"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+        </div>
+        <div class="admin-dialog-body"><div class="pinned-message-list" id="pinned-message-list"></div></div>
+      </dialog>
+
+      <dialog class="admin-dialog diagnostics-dialog" id="diagnostics-dialog">
+        <div class="admin-dialog-header">
+          <div><span class="eyebrow">DIAGNÓSTICO</span><h2>Conexão e áudio</h2></div>
+          <button class="icon-button" id="close-diagnostics-dialog-button" aria-label="Fechar diagnóstico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+        </div>
+        <div class="admin-dialog-body">
+          <div class="diagnostics-summary" id="diagnostics-summary"></div>
+          <div class="diagnostics-peers" id="diagnostics-peers"></div>
+          <div class="diagnostics-actions"><button class="button button--secondary" id="refresh-diagnostics-button" type="button">Atualizar agora</button><button class="button button--secondary" id="copy-diagnostics-button" type="button">Copiar diagnóstico</button></div>
         </div>
       </dialog>
 
@@ -607,6 +691,14 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
           </button>
         </div>
+        <div class="source-browser-toolbar">
+          <div class="source-tabs" role="tablist">
+            <button class="source-tab is-active" id="source-tab-all" type="button" data-source-filter="all">Tudo</button>
+            <button class="source-tab" id="source-tab-screens" type="button" data-source-filter="screen">Telas</button>
+            <button class="source-tab" id="source-tab-apps" type="button" data-source-filter="window">Aplicativos</button>
+          </div>
+          <input class="source-search" id="source-search" type="search" placeholder="Procurar tela ou aplicativo" autocomplete="off" />
+        </div>
         <div class="source-grid" id="source-grid"></div>
         <div class="share-quality-panel">
           <div class="share-quality-selects">
@@ -643,5 +735,9 @@
     </div>
 
     <script type="module" src="/src/main.js"></script>
+    <script type="module" src="/src/v4.2.0.js"></script>
+    <script type="module" src="/src/v4.2.2.js"></script>
+    <script type="module" src="/src/v4.2.5.js"></script>
+    <script type="module" src="/src/v4.2.6.js"></script>
   </body>
 </html>

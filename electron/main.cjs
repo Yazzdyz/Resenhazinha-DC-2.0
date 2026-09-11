@@ -1,5 +1,6 @@
-const { app, BrowserWindow, clipboard, desktopCapturer, dialog, ipcMain, nativeImage, session } = require("electron");
+const { app, BrowserWindow, clipboard, desktopCapturer, dialog, ipcMain, nativeImage, session, Notification, powerSaveBlocker } = require("electron");
 const { execFile, spawn } = require("child_process");
+const crypto = require("crypto");
 const fs = require("fs/promises");
 const fsSync = require("fs");
 const path = require("path");
@@ -8,6 +9,7 @@ const { Readable } = require("stream");
 const { pipeline } = require("stream/promises");
 
 let mainWindow;
+let voicePowerSaveBlockerId = null;
 let pendingDesktopSourceId = null;
 let filteredAudioCaptures = new Map();
 let filteredAudioSender = null;
@@ -173,12 +175,91 @@ function getServerStatePath() {
   return path.join(app.getPath("userData"), "server-state.json");
 }
 
+async function readJsonFile(filePath) {
+  try { return JSON.parse(await fs.readFile(filePath, "utf8")); }
+  catch (_error) { return null; }
+}
+
+function storedRoleCount(payload) {
+  return Array.isArray(payload?.server?.roles) ? payload.server.roles.length : 0;
+}
+
+function mergeLegacyRolesIntoState(current, legacy) {
+  if (!current || !legacy) return current || legacy || null;
+  const currentRoom = String(current.roomCode || "").toUpperCase();
+  const legacyRoom = String(legacy.roomCode || "").toUpperCase();
+  if (!currentRoom || currentRoom !== legacyRoom) return current;
+
+  const merged = { ...current, server: { ...(current.server || {}) } };
+  const roleMap = new Map();
+  const order = [];
+  [legacy, current].forEach((candidate) => {
+    (candidate.server?.roles || []).forEach((role) => {
+      const id = String(role?.id || "").slice(0, 80);
+      if (!id) return;
+      if (!roleMap.has(id)) order.push(id);
+      roleMap.set(id, role);
+    });
+  });
+  merged.server.roles = order.map((id) => roleMap.get(id)).filter(Boolean).slice(0, 12);
+
+  const memberMap = new Map();
+  [...(legacy.members || []), ...(current.members || [])].forEach((member) => {
+    const clientId = String(member?.clientId || "").trim();
+    if (!clientId) return;
+    const previous = memberMap.get(clientId) || {};
+    memberMap.set(clientId, {
+      ...previous,
+      ...member,
+      roleIds: [...new Set([...(previous.roleIds || []), ...(member.roleIds || [])].map(String))].slice(0, 12),
+      lastSeenAt: Math.max(Number(previous.lastSeenAt) || 0, Number(member.lastSeenAt) || 0),
+    });
+  });
+  if (memberMap.size) merged.members = [...memberMap.values()].slice(0, 100);
+  return merged;
+}
+
 async function readServerState() {
-  try {
-    return JSON.parse(await fs.readFile(getServerStatePath(), "utf8"));
-  } catch (_error) {
-    return null;
+  const currentPath = getServerStatePath();
+  let current = await readJsonFile(currentPath);
+  const backup = await readJsonFile(`${currentPath}.bak`);
+  if (!current && backup) current = backup;
+  else if (current && backup && storedRoleCount(backup) > storedRoleCount(current)) {
+    current = mergeLegacyRolesIntoState(current, backup);
   }
+
+  // Algumas builds antigas do Electron usaram uma pasta de userData com
+  // capitalização/nome diferente. Se a build atual abriu só com os cargos
+  // padrão, procuramos um server-state antigo e recuperamos os cargos.
+  try {
+    const appDataPath = app.getPath("appData");
+    const currentDir = path.resolve(app.getPath("userData"));
+    const entries = await fs.readdir(appDataPath, { withFileTypes: true });
+    const legacyStates = [];
+    for (const entry of entries) {
+      if (!entry.isDirectory() || !/resenhazinha/i.test(entry.name)) continue;
+      const directory = path.resolve(appDataPath, entry.name);
+      if (directory === currentDir) continue;
+      const candidate = await readJsonFile(path.join(directory, "server-state.json"));
+      if (candidate) legacyStates.push(candidate);
+    }
+
+    if (!current && legacyStates.length) {
+      current = legacyStates.sort((a, b) => {
+        const roleDiff = storedRoleCount(b) - storedRoleCount(a);
+        return roleDiff || (Number(b.savedAt) || 0) - (Number(a.savedAt) || 0);
+      })[0];
+    } else if (current && storedRoleCount(current) <= 2) {
+      const compatible = legacyStates
+        .filter((candidate) => String(candidate.roomCode || "").toUpperCase() === String(current.roomCode || "").toUpperCase())
+        .sort((a, b) => storedRoleCount(b) - storedRoleCount(a) || (Number(b.savedAt) || 0) - (Number(a.savedAt) || 0));
+      const richer = compatible.find((candidate) => storedRoleCount(candidate) > storedRoleCount(current));
+      if (richer) current = mergeLegacyRolesIntoState(current, richer);
+    }
+  } catch (_error) {
+    // Falhar ao procurar uma pasta antiga nunca impede o servidor atual de abrir.
+  }
+  return current;
 }
 
 async function writeServerState(payload) {
@@ -188,14 +269,25 @@ async function writeServerState(payload) {
   await fs.mkdir(userDataPath, { recursive: true });
   const target = getServerStatePath();
   const temporary = `${target}.tmp`;
+  const backup = `${target}.bak`;
   await fs.writeFile(temporary, serialized, "utf8");
   try {
+    // Guardamos a última cópia válida antes de trocar o arquivo principal.
+    if (fsSync.existsSync(target)) await fs.copyFile(target, backup).catch(() => undefined);
     await fs.rename(temporary, target);
   } catch (_error) {
+    if (fsSync.existsSync(target)) await fs.copyFile(target, backup).catch(() => undefined);
     await fs.writeFile(target, serialized, "utf8");
     await fs.unlink(temporary).catch(() => undefined);
   }
   return { saved: true };
+}
+
+async function deleteServerStateV306() {
+  const target = getServerStatePath();
+  const candidates = [target, `${target}.bak`, `${target}.tmp`];
+  await Promise.all(candidates.map((filePath) => fs.unlink(filePath).catch(() => undefined)));
+  return { deleted: true };
 }
 
 async function imageDataUrl(imagePath, maxBytes) {
@@ -431,7 +523,17 @@ function isVersionNewer(candidate, current) {
   return false;
 }
 
-async function downloadUpdateAsset(url, destination) {
+async function fileSha256(filePath) {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash("sha256");
+    const input = fsSync.createReadStream(filePath);
+    input.on("error", reject);
+    input.on("data", (chunk) => hash.update(chunk));
+    input.on("end", () => resolve(hash.digest("hex")));
+  });
+}
+
+async function downloadUpdateAsset(url, destination, expectedDigest = "") {
   const response = await fetch(url, {
     headers: { "User-Agent": "Resenhazinha-Updater", Accept: "application/octet-stream" },
     redirect: "follow",
@@ -448,6 +550,15 @@ async function downloadUpdateAsset(url, destination) {
   if (!stats.size || stats.size > 500 * 1024 * 1024) {
     await fs.unlink(destination).catch(() => undefined);
     throw new Error("invalid-update-size");
+  }
+
+  const digest = String(expectedDigest || "").trim().toLowerCase();
+  if (/^sha256:[0-9a-f]{64}$/.test(digest)) {
+    const actual = await fileSha256(destination);
+    if (`sha256:${actual}` !== digest) {
+      await fs.unlink(destination).catch(() => undefined);
+      throw new Error("update-checksum-mismatch");
+    }
   }
 }
 
@@ -487,18 +598,24 @@ async function launchPortableUpdater(zipPath) {
   return true;
 }
 
-async function checkForPortableUpdate() {
-  if (!app.isPackaged || process.platform !== "win32") return;
+async function checkForPortableUpdate(options = {}) {
+  const manual = Boolean(options?.manual);
+  if (!app.isPackaged || process.platform !== "win32") return { ok: false, reason: "not-packaged" };
   try {
     const response = await fetch(`https://api.github.com/repos/${UPDATE_REPOSITORY}/releases/latest`, {
       headers: { "User-Agent": "Resenhazinha-Updater", Accept: "application/vnd.github+json" },
     });
-    if (!response.ok) return;
+    if (!response.ok) return { ok: false, reason: `github-${response.status}` };
     const release = await response.json();
     const latestVersion = String(release?.tag_name || release?.name || "").replace(/^v/i, "");
-    if (!latestVersion || !isVersionNewer(latestVersion, app.getVersion())) return;
+    if (!latestVersion || !isVersionNewer(latestVersion, app.getVersion())) {
+      if (manual && mainWindow && !mainWindow.isDestroyed()) {
+        await dialog.showMessageBox(mainWindow, { type: "info", title: "Resenhazinha atualizado", message: `Você já está na versão mais recente (${app.getVersion()}).`, buttons: ["Fechar"], noLink: true });
+      }
+      return { ok: true, updateAvailable: false, currentVersion: app.getVersion(), latestVersion: latestVersion || app.getVersion() };
+    }
     const asset = Array.isArray(release?.assets) ? release.assets.find((item) => UPDATE_ASSET_PATTERN.test(String(item?.name || ""))) : null;
-    if (!asset?.browser_download_url) return;
+    if (!asset?.browser_download_url) return { ok: false, reason: "asset-not-found", latestVersion };
     const choice = await dialog.showMessageBox(mainWindow, {
       type: "info",
       title: "Atualização do Resenhazinha",
@@ -509,15 +626,30 @@ async function checkForPortableUpdate() {
       cancelId: 1,
       noLink: true,
     });
-    if (choice.response !== 0) return;
+    if (choice.response !== 0) return { ok: true, updateAvailable: true, deferred: true, latestVersion };
     const updateDirectory = path.join(app.getPath("temp"), "resenhazinha-updates");
     await fs.mkdir(updateDirectory, { recursive: true });
     const zipPath = path.join(updateDirectory, `Resenhazinha-${latestVersion}.zip`);
-    await downloadUpdateAsset(asset.browser_download_url, zipPath);
+    await downloadUpdateAsset(asset.browser_download_url, zipPath, asset.digest);
     await launchPortableUpdater(zipPath);
-  } catch (_error) {
-    // Falha de update nunca impede o app de abrir.
+    return { ok: true, updateAvailable: true, installing: true, latestVersion };
+  } catch (error) {
+    if (manual && mainWindow && !mainWindow.isDestroyed()) {
+      await dialog.showMessageBox(mainWindow, { type: "error", title: "Atualização", message: "Não consegui verificar ou instalar a atualização agora.", detail: String(error?.message || error || "Erro desconhecido"), buttons: ["Fechar"], noLink: true });
+    }
+    return { ok: false, reason: String(error?.message || "update-failed") };
   }
+}
+
+function setVoicePowerSave(active) {
+  if (active) {
+    if (voicePowerSaveBlockerId == null || !powerSaveBlocker.isStarted(voicePowerSaveBlockerId)) {
+      voicePowerSaveBlockerId = powerSaveBlocker.start("prevent-display-sleep");
+    }
+    return;
+  }
+  if (voicePowerSaveBlockerId != null && powerSaveBlocker.isStarted(voicePowerSaveBlockerId)) powerSaveBlocker.stop(voicePowerSaveBlockerId);
+  voicePowerSaveBlockerId = null;
 }
 
 function createWindow() {
@@ -529,6 +661,7 @@ function createWindow() {
     backgroundColor: "#000000",
     title: "Resenhazinha",
     autoHideMenuBar: true,
+    frame: false,
     show: false,
     icon: path.join(__dirname, "../public/icon.png"),
     webPreferences: {
@@ -536,11 +669,15 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      backgroundThrottling: false,
     },
   });
 
-  mainWindow.once("ready-to-show", () => mainWindow.show());
-  mainWindow.on("closed", stopFilteredAudioCapture);
+  mainWindow.once("ready-to-show", () => {
+    if (!mainWindow.isMaximized()) mainWindow.maximize();
+    mainWindow.show();
+  });
+  mainWindow.on("closed", () => { stopFilteredAudioCapture(); setVoicePowerSave(false); });
 
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   mainWindow.webContents.on("will-navigate", (event, url) => {
@@ -572,7 +709,7 @@ app.whenReady().then(() => {
     event.returnValue = Boolean(pendingDesktopSourceId);
   });
 
-  session.defaultSession.setDisplayMediaRequestHandler(async (_request, callback) => {
+  session.defaultSession.setDisplayMediaRequestHandler(async (request, callback) => {
     const requestedSourceId = pendingDesktopSourceId;
     pendingDesktopSourceId = null;
 
@@ -584,9 +721,9 @@ app.whenReady().then(() => {
         return;
       }
 
-      // O getDisplayMedia fornece somente a imagem. No desktop, todo áudio da
-      // transmissão precisa passar pelo mixer seguro por aplicativo abaixo.
-      callback({ video: source });
+      // O mixer por aplicativo é a rota principal. O loopback nativo fica
+      // disponível como fallback quando o addon não consegue capturar áudio.
+      callback({ video: source, ...(request.audioRequested ? { audio: "loopback" } : {}) });
     } catch (_error) {
       callback({});
     }
@@ -699,9 +836,73 @@ app.whenReady().then(() => {
     return { stopped: true };
   });
 
+  ipcMain.on("resenhazinha:voice-active", (_event, active) => {
+    setVoicePowerSave(Boolean(active));
+  });
+
   ipcMain.handle("resenhazinha:copy", (_event, text) => {
     clipboard.writeText(String(text));
     return true;
+  });
+
+  ipcMain.handle("resenhazinha:set-window-fullscreen", (_event, enabled) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return false;
+    const target = Boolean(enabled);
+    mainWindow.setFullScreen(target);
+    return target;
+  });
+
+  ipcMain.handle("resenhazinha:window-action", (_event, action) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return { maximized: false };
+
+    if (action === "minimize") {
+      mainWindow.minimize();
+    } else if (action === "toggle-maximize") {
+      if (mainWindow.isMaximized()) mainWindow.unmaximize();
+      else mainWindow.maximize();
+    } else if (action === "close") {
+      mainWindow.close();
+    }
+
+    return { maximized: mainWindow.isMaximized(), fullscreen: mainWindow.isFullScreen() };
+  });
+
+  ipcMain.handle("resenhazinha:get-window-state", () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return { maximized: false, fullscreen: false };
+    return { maximized: mainWindow.isMaximized(), fullscreen: mainWindow.isFullScreen() };
+  });
+
+  const sendWindowState = () => {
+    if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return;
+    mainWindow.webContents.send("resenhazinha:window-state", {
+      maximized: mainWindow.isMaximized(),
+      fullscreen: mainWindow.isFullScreen(),
+    });
+  };
+
+  ipcMain.handle("resenhazinha:app-info", () => ({
+    version: app.getVersion(),
+    platform: process.platform,
+    packaged: app.isPackaged,
+    installDirectory: path.dirname(process.execPath),
+  }));
+
+  ipcMain.handle("resenhazinha:check-update", async () => checkForPortableUpdate({ manual: true }));
+
+  ipcMain.handle("resenhazinha:notify", (_event, payload) => {
+    if (!Notification.isSupported()) return { shown: false, reason: "unsupported" };
+    const title = String(payload?.title || "Resenhazinha").slice(0, 80);
+    const body = String(payload?.body || "").slice(0, 240);
+    const notification = new Notification({ title, body, icon: path.join(__dirname, "../public/icon.png"), silent: Boolean(payload?.silent) });
+    notification.on("click", () => {
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+      mainWindow.webContents.send("resenhazinha:notification-click", { messageId: String(payload?.messageId || "") });
+    });
+    notification.show();
+    return { shown: true };
   });
 
   ipcMain.handle("resenhazinha:load-profile", async () => {
@@ -753,6 +954,14 @@ app.whenReady().then(() => {
       return await writeServerState(payload);
     } catch (_error) {
       return { saved: false, reason: "write-failed" };
+    }
+  });
+
+  ipcMain.handle("resenhazinha:delete-server-state", async () => {
+    try {
+      return await deleteServerStateV306();
+    } catch (_error) {
+      return { deleted: false };
     }
   });
 
@@ -943,4 +1152,3 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", stopFilteredAudioCapture);
-

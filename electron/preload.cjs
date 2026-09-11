@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld("resenhazinhaDesktop", {
     ipcRenderer.invoke("resenhazinha:start-filtered-audio", excludedProcessIds)
   ),
   stopFilteredAudioCapture: () => ipcRenderer.invoke("resenhazinha:stop-filtered-audio"),
+  setVoiceActive: (active) => ipcRenderer.send("resenhazinha:voice-active", Boolean(active)),
   onFilteredAudioChunk: (callback) => {
     ipcRenderer.removeAllListeners("resenhazinha:filtered-audio-chunk");
     ipcRenderer.on("resenhazinha:filtered-audio-chunk", (_event, chunk) => callback(chunk));
@@ -17,10 +18,25 @@ contextBridge.exposeInMainWorld("resenhazinhaDesktop", {
     ipcRenderer.removeAllListeners("resenhazinha:filtered-audio-chunk");
   },
   copyText: (text) => ipcRenderer.invoke("resenhazinha:copy", text),
+  setWindowFullscreen: (enabled) => ipcRenderer.invoke("resenhazinha:set-window-fullscreen", Boolean(enabled)),
+  windowAction: (action) => ipcRenderer.invoke("resenhazinha:window-action", action),
+  getWindowState: () => ipcRenderer.invoke("resenhazinha:get-window-state"),
+  onWindowState: (callback) => {
+    ipcRenderer.removeAllListeners("resenhazinha:window-state");
+    ipcRenderer.on("resenhazinha:window-state", (_event, state) => callback(state));
+  },
+  getAppInfo: () => ipcRenderer.invoke("resenhazinha:app-info"),
+  checkForUpdate: () => ipcRenderer.invoke("resenhazinha:check-update"),
+  showNotification: (payload) => ipcRenderer.invoke("resenhazinha:notify", payload),
+  onNotificationClick: (callback) => {
+    ipcRenderer.removeAllListeners("resenhazinha:notification-click");
+    ipcRenderer.on("resenhazinha:notification-click", (_event, payload) => callback(payload));
+  },
   loadProfile: () => ipcRenderer.invoke("resenhazinha:load-profile"),
   saveProfileText: (payload) => ipcRenderer.invoke("resenhazinha:save-profile-text", payload),
   loadServerState: () => ipcRenderer.invoke("resenhazinha:load-server-state"),
   saveServerState: (payload) => ipcRenderer.invoke("resenhazinha:save-server-state", payload),
+  deleteServerState: () => ipcRenderer.invoke("resenhazinha:delete-server-state"),
   cacheMemberProfile: (payload) => ipcRenderer.invoke("resenhazinha:cache-member-profile", payload),
   loadMemberProfiles: () => ipcRenderer.invoke("resenhazinha:load-member-profiles"),
   deleteMemberProfile: (clientId) => ipcRenderer.invoke("resenhazinha:delete-member-profile", clientId),

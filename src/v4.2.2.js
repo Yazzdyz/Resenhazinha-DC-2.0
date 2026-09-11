@@ -282,9 +282,10 @@ function updateFullscreenButton(card, isActive) {
     : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M21 16v5h-5M8 21H3v-5"/></svg><span>Tela cheia</span>';
 }
 
-function exitDiscordFullscreen() {
+async function exitDiscordFullscreen() {
   if (!fullscreenState) return;
   const { card, placeholder, exitButton } = fullscreenState;
+  try { await window.resenhazinhaDesktop?.setWindowFullscreen?.(false); } catch (_error) {}
   exitButton?.remove();
   card.classList.remove(FULLSCREEN_CLASS);
   document.body.classList.remove(BODY_FULLSCREEN_CLASS);
@@ -294,9 +295,9 @@ function exitDiscordFullscreen() {
   fullscreenState = null;
 }
 
-function enterDiscordFullscreen(card) {
+async function enterDiscordFullscreen(card) {
   if (!card || fullscreenState?.card === card) return;
-  if (fullscreenState) exitDiscordFullscreen();
+  if (fullscreenState) await exitDiscordFullscreen();
 
   const parent = card.parentNode;
   if (!parent) return;
@@ -317,6 +318,7 @@ function enterDiscordFullscreen(card) {
   document.body.classList.add(BODY_FULLSCREEN_CLASS);
   document.documentElement.classList.add(BODY_FULLSCREEN_CLASS);
   updateFullscreenButton(card, true);
+  try { await window.resenhazinhaDesktop?.setWindowFullscreen?.(true); } catch (_error) {}
 
   exitButton.addEventListener("click", (event) => {
     event.preventDefault();
@@ -325,9 +327,9 @@ function enterDiscordFullscreen(card) {
   });
 }
 
-function toggleDiscordFullscreen(card) {
-  if (fullscreenState?.card === card) exitDiscordFullscreen();
-  else enterDiscordFullscreen(card);
+async function toggleDiscordFullscreen(card) {
+  if (fullscreenState?.card === card) await exitDiscordFullscreen();
+  else await enterDiscordFullscreen(card);
 }
 
 function enhanceScreenCards() {
