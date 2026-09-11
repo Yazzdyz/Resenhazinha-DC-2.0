@@ -1,5 +1,17 @@
 # Atualizações do Resenhazinha
 
+## 4.4.1
+
+- Corrige negociação de voz e tela após a migração para o servidor Cloudflare.
+- Presença de voz e compartilhamento recebem eventos dedicados do Worker, sem depender só do timing do roster.
+- Peer ID de mídia é atualizado pelo clientId estável após reconexões.
+- Adiciona novas tentativas curtas e controladas de negociação de voz/tela/câmera.
+- Corrige avatar/banner sumindo ao entrar ou reconectar no servidor.
+- Perfis são ressincronizados automaticamente quando alguém entra.
+- Sons de entrada/saída e compartilhamento ganham fallback local caso o áudio remoto falhe ou demore.
+- Fechamento de uma sessão antiga não apaga o estado de uma conexão nova.
+
+
 ## 4.4.0
 
 - Cloudflare Worker + Durable Object volta a ser a autoridade do servidor.
