@@ -212,6 +212,7 @@ const cloudRtc = new CloudRtcManager({
   // caminho crítico do WebRTC.
   getVoiceStream: () => state.rawMicrophoneStream || state.localStream,
   getScreenStream: () => state.screenStream,
+  getScreenProfile: () => shareProfile(),
   onVoiceStream: (entry, stream) => {
     const member = state.members.find((item) => item.clientId === entry.clientId);
     const peerId = member?.peerId || entry.peerId || entry.clientId;
@@ -363,7 +364,7 @@ elements.screenGridButton.addEventListener("click", () => setScreenLayout("grid"
 elements.leaveButton.addEventListener("click", leaveVoiceChannel);
 elements.chatToggleButton.addEventListener("click", () => switchView("text"));
 elements.textChannelButton.addEventListener("click", () => switchView("text"));
-elements.voiceChannelButton.addEventListener("click", () => switchView("voice"));
+elements.voiceChannelButton.addEventListener("click", () => { if (state.inVoice) switchView("voice"); else void joinVoiceChannel(); });
 elements.pinnedMessagesButton.addEventListener("click", openPinnedMessages);
 elements.diagnosticsButton.addEventListener("click", openDiagnostics);
 elements.userSettingsButton.addEventListener("click", openUserSettings);
@@ -6274,9 +6275,9 @@ function shareProfile() {
     "1440p": { width: 2560, height: 1440 },
   };
   const bitrates = {
-    "720p": { 15: 2_000_000, 30: 3_500_000, 60: 6_000_000 },
-    "1080p": { 15: 3_500_000, 30: 6_000_000, 60: 10_000_000 },
-    "1440p": { 15: 6_000_000, 30: 10_000_000, 60: 16_000_000 },
+    "720p": { 15: 4_000_000, 30: 7_000_000, 60: 12_000_000 },
+    "1080p": { 15: 7_000_000, 30: 12_000_000, 60: 20_000_000 },
+    "1440p": { 15: 10_000_000, 30: 18_000_000, 60: 30_000_000 },
   };
   return { quality, fps, ...sizes[quality], bitrate: bitrates[quality][fps] };
 }
@@ -6367,6 +6368,8 @@ function tuneScreenCall(call) {
     if (!parameters.encodings?.length) parameters.encodings = [{}];
     parameters.encodings[0].maxBitrate = profile.bitrate;
     parameters.encodings[0].maxFramerate = profile.fps;
+    parameters.encodings[0].scaleResolutionDownBy = 1;
+    parameters.encodings[0].priority = "high";
     parameters.degradationPreference = profile.fps >= 60 ? "maintain-framerate" : "balanced";
     sender.setParameters(parameters).catch(() => undefined);
   };
