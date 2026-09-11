@@ -220,15 +220,28 @@
               <div class="gif-results" id="gif-results" aria-live="polite"></div>
               <div class="gif-picker-status" id="gif-picker-status">Abra para ver GIFs em destaque.</div>
             </div>
+            <div class="emoji-picker" id="emoji-picker" hidden>
+              <div class="emoji-picker-head">
+                <strong>Emojis</strong>
+                <span>Resenhazinha</span>
+              </div>
+              <div class="emoji-category-tabs" id="emoji-category-tabs" aria-label="Categorias de emoji"></div>
+              <div class="emoji-results" id="emoji-results" aria-label="Escolher emoji"></div>
+            </div>
             <form class="chat-form chat-form--full" id="chat-form">
               <button class="chat-attachment-button" type="button" id="chat-attachment-button" aria-label="Adicionar arquivo" title="Enviar foto, vídeo ou arquivo">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
               </button>
               <input id="chat-file-input" type="file" multiple hidden />
               <textarea id="chat-input" maxlength="500" rows="1" placeholder="Mensagem para #chat-principal" aria-label="Mensagem para o canal"></textarea>
-              <button class="chat-gif-button" type="button" id="chat-gif-button" aria-label="Abrir GIFs" title="GIF">
-                <span>GIF</span>
-              </button>
+              <div class="chat-inline-tools" aria-label="Ferramentas da mensagem">
+                <button class="chat-gif-button" type="button" id="chat-gif-button" aria-label="Abrir GIFs" title="GIF">
+                  <span>GIF</span>
+                </button>
+                <button class="chat-emoji-button" type="button" id="chat-emoji-button" aria-label="Abrir emojis" title="Emoji">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="9" cy="10" r="1"/><circle cx="15" cy="10" r="1"/><path d="M8.5 14.2c1 1.2 2.1 1.8 3.5 1.8s2.5-.6 3.5-1.8"/></svg>
+                </button>
+              </div>
               <button type="submit" id="send-chat-button" aria-label="Enviar mensagem" title="Enviar mensagem">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4 20-7Z"/><path d="M22 2 11 13"/></svg>
               </button>
@@ -312,16 +325,16 @@
       <div class="member-profile-popover" id="member-profile-popover" hidden role="dialog" aria-label="Perfil do membro">
         <div class="member-profile-banner" id="member-profile-banner"></div>
         <div class="member-profile-body">
-          <span class="avatar member-profile-avatar" id="member-profile-avatar">?</span>
+          <button class="avatar member-profile-avatar member-profile-open-full" id="member-profile-avatar" type="button" aria-label="Abrir perfil completo">?</button>
           <button class="member-profile-close" id="member-profile-close" type="button" aria-label="Fechar perfil">×</button>
           <div class="member-profile-name-row">
-            <strong id="member-profile-name">Membro</strong>
+            <button class="member-profile-name-button member-profile-open-full" id="member-profile-name" type="button">Membro</button>
             <span class="owner-crown owner-crown--profile" id="member-profile-owner" hidden title="Dono do servidor" aria-label="Dono do servidor"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7.5 7.2 11 12 4l4.8 7L21 7.5l-1.7 10H4.7L3 7.5Z"/><path d="M5 20h14"/></svg></span>
           </div>
           <span class="member-profile-status" id="member-profile-status">Online</span>
           <div class="member-profile-separator"></div>
           <section class="member-profile-section member-profile-bio-section" id="member-profile-bio-section" hidden>
-            <small>BIO</small>
+            <small>SOBRE MIM</small>
             <p class="member-profile-bio-text" id="member-profile-bio-text"></p>
           </section>
           <section class="member-profile-section">
@@ -329,8 +342,52 @@
             <div class="member-profile-roles" id="member-profile-roles"></div>
           </section>
           <div class="member-profile-actions" id="member-profile-actions"></div>
+          <button class="member-profile-expand-hint member-profile-open-full" type="button">Ver perfil completo</button>
         </div>
       </div>
+
+      <dialog class="member-profile-dialog" id="member-profile-dialog">
+        <button class="member-profile-dialog-close" id="member-profile-dialog-close" type="button" aria-label="Fechar perfil completo">×</button>
+        <div class="member-profile-dialog-shell">
+          <aside class="member-profile-dialog-card">
+            <div class="member-profile-dialog-banner" id="member-profile-dialog-banner"></div>
+            <div class="member-profile-dialog-card-body">
+              <span class="avatar member-profile-dialog-avatar" id="member-profile-dialog-avatar">?</span>
+              <div class="member-profile-dialog-identity">
+                <div class="member-profile-dialog-name-row">
+                  <strong id="member-profile-dialog-name">Membro</strong>
+                  <span class="owner-crown owner-crown--profile" id="member-profile-dialog-owner" hidden title="Dono do servidor" aria-label="Dono do servidor"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7.5 7.2 11 12 4l4.8 7L21 7.5l-1.7 10H4.7L3 7.5Z"/><path d="M5 20h14"/></svg></span>
+                </div>
+                <span id="member-profile-dialog-status">Offline</span>
+              </div>
+              <div class="member-profile-dialog-actions" id="member-profile-dialog-actions"></div>
+              <section class="member-profile-dialog-section" id="member-profile-dialog-bio-section" hidden>
+                <small>SOBRE MIM</small>
+                <p id="member-profile-dialog-bio"></p>
+              </section>
+              <section class="member-profile-dialog-section">
+                <small>CARGOS</small>
+                <div class="member-profile-dialog-roles" id="member-profile-dialog-roles"></div>
+              </section>
+              <section class="member-profile-dialog-section member-profile-dialog-server-info">
+                <small>SERVIDOR</small>
+                <strong id="member-profile-dialog-server-name">Resenhazinha</strong>
+                <span id="member-profile-dialog-server-state">Membro do servidor</span>
+              </section>
+            </div>
+          </aside>
+          <section class="member-profile-dialog-activity">
+            <div class="member-profile-dialog-tabs">
+              <button class="is-active" type="button">Atividade</button>
+            </div>
+            <div class="member-profile-dialog-activity-body">
+              <div class="member-profile-dialog-activity-icon">✦</div>
+              <strong id="member-profile-dialog-activity-title">Nenhuma atividade para compartilhar aqui</strong>
+              <p id="member-profile-dialog-activity-copy">Quando esta pessoa estiver em call ou transmitindo, você verá isso por aqui.</p>
+            </div>
+          </section>
+        </div>
+      </dialog>
 
       <div class="presence-popover" id="presence-popover" hidden role="menu" aria-label="Alterar status">
         <div class="presence-popover-list">
