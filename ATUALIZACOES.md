@@ -1,5 +1,16 @@
 # Atualizações do Resenhazinha
 
+## 4.4.0
+
+- Cloudflare Worker + Durable Object volta a ser a autoridade do servidor.
+- O servidor continua online mesmo com o PC do Owner fechado.
+- Todos os clientes recebem roster, presença da call, chat e administração direto da nuvem.
+- PeerJS fica restrito à mídia P2P (voz, câmera e tela), sem hospedar o servidor.
+- Presença de voz revisionada da 4.3.1 é sincronizada pelo Cloudflare.
+- Owner pode recuperar a chave cloud após a regressão da linha 4.3.x.
+- Chat, anexos, reações e perfis voltam a usar o backend persistente.
+
+
 ## 4.3.1
 
 - Corrige o bug em que duas pessoas entravam na call mas cada uma aparecia sozinha.
