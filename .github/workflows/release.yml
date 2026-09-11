@@ -16,7 +16,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  APP_VERSION: "4.3.1"
+  APP_VERSION: "4.4.0"
 
 jobs:
   windows-release:
@@ -67,7 +67,7 @@ jobs:
           $tag = "v$env:APP_VERSION"
           gh release view $tag --repo "${{ github.repository }}" *> $null
           if ($LASTEXITCODE -ne 0) {
-            gh release create $tag --repo "${{ github.repository }}" --target $env:GITHUB_SHA --title "Resenhazinha $tag" --notes "Corrige sincronização da call: roster atrasado não separa participantes e a presença de voz é reforçada pelo heartbeat."
+            gh release create $tag --repo "${{ github.repository }}" --target $env:GITHUB_SHA --title "Resenhazinha $tag" --notes "Cloudflare volta a ser o servidor central: roster, presença, chat e administração deixam de depender do PC do Owner."
           }
           gh release upload $tag `
             "release/Resenhazinha-Setup-$env:APP_VERSION.exe" `
