@@ -48,6 +48,7 @@ export class CloudRtcManager {
     this.sendSignal = options.sendSignal;
     this.getVoiceStream = options.getVoiceStream;
     this.getScreenStream = options.getScreenStream;
+    this.getScreenProfile = options.getScreenProfile;
     this.onVoiceStream = options.onVoiceStream;
     this.onScreenStream = options.onScreenStream;
     this.onState = options.onState;
@@ -175,13 +176,41 @@ export class CloudRtcManager {
     return entry;
   }
 
+  _tuneScreenSender(sender) {
+    if (!sender?.track || sender.track.kind !== "video" || !sender.getParameters || !sender.setParameters) return;
+    const profile = this.getScreenProfile?.() || {};
+    const bitrate = Math.max(1_000_000, Number(profile.bitrate) || 12_000_000);
+    const fps = [15, 30, 60].includes(Number(profile.fps)) ? Number(profile.fps) : 30;
+
+    const apply = () => {
+      try {
+        const parameters = sender.getParameters();
+        if (!parameters.encodings?.length) parameters.encodings = [{}];
+        parameters.encodings[0].maxBitrate = bitrate;
+        parameters.encodings[0].maxFramerate = fps;
+        parameters.encodings[0].scaleResolutionDownBy = 1;
+        parameters.encodings[0].priority = "high";
+        parameters.degradationPreference = fps >= 60 ? "maintain-framerate" : "balanced";
+        sender.setParameters(parameters).catch(() => undefined);
+      } catch {}
+    };
+
+    apply();
+    setTimeout(apply, 800);
+    setTimeout(apply, 2500);
+  }
+
   _addLocalTracks(entry) {
     const stream = entry.kind === "voice" ? this.getVoiceStream?.() : this.getScreenStream?.();
     if (!stream) return;
     const existingTrackIds = new Set(entry.pc.getSenders().map((sender) => sender.track?.id).filter(Boolean));
     for (const track of stream.getTracks()) {
       if (existingTrackIds.has(track.id)) continue;
-      entry.pc.addTrack(track, stream);
+      const sender = entry.pc.addTrack(track, stream);
+      if (entry.kind === "screen") this._tuneScreenSender(sender);
+    }
+    if (entry.kind === "screen") {
+      entry.pc.getSenders().forEach((sender) => this._tuneScreenSender(sender));
     }
   }
 
