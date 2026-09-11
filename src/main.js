@@ -81,6 +81,9 @@ const state = {
   memberRegistry: new Map(),
   revokedClientIds: new Set(),
   incomingProfileMedia: new Map(),
+  pendingProfileMedia: new Map(),
+  profileResyncTimer: null,
+  mediaReconcileTimers: new Set(),
   members: [],
   voiceCalls: callSessions.map("voice"),
   voiceStats: new Map(),
@@ -185,6 +188,9 @@ const state = {
   guestDisconnectTimers: new Map(),
   server: createDefaultServer(),
 };
+
+document.addEventListener("pointerdown", unlockUiAudio, { capture: true });
+document.addEventListener("keydown", unlockUiAudio, { capture: true });
 
 const $ = (selector) => document.querySelector(selector);
 const elements = {
@@ -471,18 +477,54 @@ function primeUiSounds() {
   });
 }
 
+function unlockUiAudio() {
+  const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextCtor) return;
+  try {
+    uiFallbackAudioContext ||= new AudioContextCtor();
+    if (uiFallbackAudioContext.state === "suspended") void uiFallbackAudioContext.resume().catch(() => undefined);
+    ["voiceJoin", "voiceLeave", "micMute", "micUnmute", "deafen", "undeafen"].forEach((kind) => {
+      const audio = uiSoundElement(kind);
+      try { audio?.load?.(); } catch (_error) {}
+    });
+  } catch (_error) {}
+}
+
 function playUiSound(kind, volume = 0.45) {
   if (state.microphoneTest?.silencingPlayback) return;
+  unlockUiAudio();
+
   const base = uiSoundElement(kind);
-  if (!base) { fallbackUiSound(kind, volume); return; }
+  if (!base) {
+    fallbackUiSound(kind, volume);
+    return;
+  }
+
+  let started = false;
+  let fallbackPlayed = false;
+  const playFallback = () => {
+    if (started || fallbackPlayed) return;
+    fallbackPlayed = true;
+    fallbackUiSound(kind, volume);
+  };
+
   try {
-    // cloneNode permite sons próximos sem um cortar o outro (mensagem + entrada, por exemplo).
     const audio = base.cloneNode(true);
     audio.volume = clampVolume(volume);
+    audio.addEventListener("playing", () => {
+      started = true;
+    }, { once: true });
+    const watchdog = window.setTimeout(playFallback, 450);
     const playback = audio.play();
-    if (playback?.catch) playback.catch(() => fallbackUiSound(kind, volume));
+    if (playback?.then) playback.then(() => {
+      started = true;
+      window.clearTimeout(watchdog);
+    }).catch(() => {
+      window.clearTimeout(watchdog);
+      playFallback();
+    });
   } catch (_error) {
-    fallbackUiSound(kind, volume);
+    playFallback();
   }
 }
 
@@ -1264,6 +1306,133 @@ function applyGuestVoiceStatus(peerId, message) {
   return changed;
 }
 
+function scheduleMediaReconcileBurst() {
+  state.mediaReconcileTimers.forEach((timer) => window.clearTimeout(timer));
+  state.mediaReconcileTimers.clear();
+  [80, 260, 700, 1500, 3200].forEach((delay) => {
+    const timer = window.setTimeout(() => {
+      state.mediaReconcileTimers.delete(timer);
+      if (!state.roomEntered || !state.inVoice) return;
+      reconcileVoiceCalls();
+      reconcileScreenCalls();
+      reconcileCameraCalls();
+    }, delay);
+    state.mediaReconcileTimers.add(timer);
+  });
+}
+
+function memberForCloudIdentity(peerId, clientId) {
+  const cleanClient = sanitizeClientId(clientId);
+  return state.members.find((member) => member.peerId === String(peerId || ""))
+    || (cleanClient ? state.members.find((member) => member.clientId === cleanClient) : null)
+    || null;
+}
+
+function applyCloudVoicePresence(message) {
+  const raw = message?.member;
+  if (!raw || typeof raw !== "object") return;
+
+  const clientId = sanitizeClientId(raw.clientId);
+  const peerId = String(raw.peerId || "").slice(0, 120);
+  if (!clientId || !peerId) return;
+
+  const previous = memberForCloudIdentity(peerId, clientId);
+  const previousPeerId = previous?.peerId || "";
+  const incomingRevision = normalizeVoicePresenceRevision(raw.voicePresenceRevision);
+  const currentRevision = normalizeVoicePresenceRevision(previous?.voicePresenceRevision);
+
+  if (previous && incomingRevision < currentRevision) return;
+
+  const isSelf = clientId === state.clientId || peerId === state.peer?.id;
+  if (isSelf && incomingRevision < normalizeVoicePresenceRevision(state.voicePresenceRevision)) return;
+
+  const member = previous || {
+    peerId,
+    clientId,
+    name: cleanNickname(raw.name || "Amigo") || "Amigo",
+    avatar: null,
+    banner: null,
+    bio: "",
+    roleIds: normalizeRoleIds(raw.roleIds),
+    sessionStartedAt: 0,
+  };
+
+  if (previousPeerId && previousPeerId !== peerId) {
+    callSessions.cancelRetries("voice", previousPeerId);
+    callSessions.cancelRetries("screen", previousPeerId);
+    closeCallsForPeer(previousPeerId);
+    clearScreenStage(previousPeerId);
+    state.activeScreens.delete(previousPeerId);
+  }
+
+  member.peerId = peerId;
+  member.clientId = clientId;
+  member.name = cleanNickname(raw.name || member.name || "Amigo") || "Amigo";
+  member.muted = Boolean(raw.muted);
+  member.deafened = Boolean(raw.deafened);
+  member.serverMuted = Boolean(raw.serverMuted);
+  member.inVoice = Boolean(raw.inVoice) && state.server.voiceChannel.exists;
+  member.voiceJoinedAt = member.inVoice ? normalizeVoiceJoinedAt(raw.voiceJoinedAt) || member.voiceJoinedAt || Date.now() : null;
+  member.voiceSessionId = member.inVoice ? normalizeMediaSessionId(raw.voiceSessionId) : "";
+  member.voicePresenceRevision = incomingRevision;
+  member.roleIds = normalizeRoleIds(raw.roleIds || member.roleIds);
+  member.presence = normalizePresence(raw.presence || member.presence || DEFAULT_PRESENCE);
+  member.offlineSnapshot = Boolean(raw.offlineSnapshot);
+
+  state.members = dedupeMembersByIdentity([
+    ...state.members.filter((item) => item !== previous && item.clientId !== clientId),
+    member,
+  ]);
+
+  if (isSelf && shouldApplyVoicePresenceSnapshot(state.voicePresenceRevision, incomingRevision)) {
+    state.voicePresenceRevision = Math.max(normalizeVoicePresenceRevision(state.voicePresenceRevision), incomingRevision);
+    if (!state.inVoice || !member.inVoice) {
+      state.inVoice = member.inVoice;
+      state.voiceJoinedAt = member.inVoice ? member.voiceJoinedAt : null;
+    }
+    state.serverMuted = member.serverMuted;
+    applyLocalAudioState();
+  }
+
+  if (!member.inVoice) {
+    closeCallsForPeer(peerId);
+    if (previousPeerId && previousPeerId !== peerId) closeCallsForPeer(previousPeerId);
+  }
+
+  applyPendingProfileMediaToMembers();
+  renderMembers();
+  renderVoiceGrid();
+  updateControlState();
+  syncActivitySoundState();
+  if (state.inVoice) scheduleMediaReconcileBurst();
+}
+
+function applyCloudScreenPresence(message) {
+  const clientId = sanitizeClientId(message?.clientId);
+  const announcedPeerId = String(message?.peerId || "").slice(0, 120);
+  const member = memberForCloudIdentity(announcedPeerId, clientId);
+  const peerId = member?.peerId || announcedPeerId;
+  if (!peerId) return;
+
+  if (message.started) {
+    const screenSessionId = normalizeMediaSessionId(message.screenSessionId);
+    state.activeScreens.set(peerId, {
+      peerId,
+      name: cleanNickname(message.name || member?.name || "Amigo") || "Amigo",
+      screenSessionId,
+    });
+  } else {
+    state.activeScreens.delete(peerId);
+    clearScreenStage(peerId);
+  }
+
+  state.activeScreen = state.activeScreens.values().next().value || null;
+  renderMembers();
+  renderScreenStage();
+  syncActivitySoundState();
+  if (state.inVoice) scheduleMediaReconcileBurst();
+}
+
 function startConnectionHeartbeat() {
   window.clearInterval(state.heartbeatTimer);
   state.heartbeatTimer = null;
@@ -1701,6 +1870,44 @@ function applyProfileMediaToMember(clientId, kind, value) {
   return member;
 }
 
+function pendingProfileKey(clientId, kind) {
+  return `${sanitizeClientId(clientId)}:${String(kind || "")}`;
+}
+
+function rememberPendingProfileMedia(clientId, kind, value) {
+  const id = sanitizeClientId(clientId);
+  if (!id || !["avatar", "banner"].includes(kind)) return;
+  const safe = sanitizeProfileMedia(kind, value);
+  if (!safe) return;
+  state.pendingProfileMedia.set(pendingProfileKey(id, kind), safe);
+}
+
+function applyPendingProfileMediaToMembers() {
+  if (!state.pendingProfileMedia.size) return;
+  for (const [key, value] of [...state.pendingProfileMedia.entries()]) {
+    const split = key.lastIndexOf(":");
+    const clientId = key.slice(0, split);
+    const kind = key.slice(split + 1);
+    const member = memberByClientId(clientId);
+    if (!member) continue;
+    member[kind] = value;
+    state.pendingProfileMedia.delete(key);
+    void Promise.resolve(window.resenhazinhaDesktop?.cacheMemberProfile?.({
+      clientId,
+      [kind]: value,
+      bio: member.bio || "",
+    })).catch(() => undefined);
+  }
+}
+
+function scheduleOwnProfileResync(delay = 180) {
+  window.clearTimeout(state.profileResyncTimer);
+  state.profileResyncTimer = window.setTimeout(() => {
+    if (!state.hostConnection?.open) return;
+    void sendOwnProfileMediaToHost();
+  }, Math.max(50, Number(delay) || 180));
+}
+
 async function finishProfileMediaTransfer(sourcePeerId, message) {
   const transferId = String(message.transferId || "");
   const transfer = state.incomingProfileMedia.get(transferId);
@@ -1711,7 +1918,15 @@ async function finishProfileMediaTransfer(sourcePeerId, message) {
   const safe = sanitizeProfileMedia(transfer.kind, value);
   if (!safe) return;
   const member = applyProfileMediaToMember(transfer.clientId, transfer.kind, safe);
-  if (!member) return;
+  if (!member) {
+    rememberPendingProfileMedia(transfer.clientId, transfer.kind, safe);
+    return;
+  }
+  void Promise.resolve(window.resenhazinhaDesktop?.cacheMemberProfile?.({
+    clientId: transfer.clientId,
+    [transfer.kind]: safe,
+    bio: member.bio || "",
+  })).catch(() => undefined);
   if (state.isHost && !state.cloudMode) {
     void Promise.resolve(window.resenhazinhaDesktop?.cacheMemberProfile?.({ clientId: transfer.clientId, [transfer.kind]: safe, bio: member.bio })).catch(() => undefined);
     state.guestConnections.forEach((connection, peerId) => { if (connection.open && peerId !== sourcePeerId) void sendProfileMedia(connection, transfer.clientId, transfer.kind, safe); });
@@ -2131,6 +2346,21 @@ function handleHostMessage(message) {
   if (!message || typeof message !== "object") return;
   if (message.type === "heartbeat-ack") return;
 
+  if (message.type === "voice-presence") {
+    applyCloudVoicePresence(message);
+    return;
+  }
+
+  if (message.type === "screen-presence") {
+    applyCloudScreenPresence(message);
+    return;
+  }
+
+  if (message.type === "profile-media-request-self") {
+    scheduleOwnProfileResync(240);
+    return;
+  }
+
   if (message.type === "cloud-ready") {
     state.cloudReady = true;
     if (state.isHost && normalizeInviteToken(message.inviteToken)) {
@@ -2161,6 +2391,11 @@ function handleHostMessage(message) {
       renderChatHistory();
     }
     setConnectionState("Nuvem conectada", "ok");
+    unlockUiAudio();
+    if (state.hostConnection?.open) {
+      state.hostConnection.send({ type: "profile-media-request-all" });
+      scheduleOwnProfileResync(320);
+    }
     return;
   }
 
@@ -2250,14 +2485,15 @@ function handleHostMessage(message) {
         voicePresenceExplicit: member.voicePresenceRevision !== undefined && member.voicePresenceRevision !== null,
         sessionStartedAt: Number(member.sessionStartedAt) || 0,
         roleIds: normalizeRoleIds(member.roleIds),
-        avatar: previous?.avatar || (peerId === state.peer?.id ? state.avatarData : null),
-        banner: previous?.banner || (peerId === state.peer?.id ? state.bannerData : null),
+        avatar: previous?.avatar || state.pendingProfileMedia.get(pendingProfileKey(clientId, "avatar")) || (peerId === state.peer?.id ? state.avatarData : null),
+        banner: previous?.banner || state.pendingProfileMedia.get(pendingProfileKey(clientId, "banner")) || (peerId === state.peer?.id ? state.bannerData : null),
         bio: message.includeProfiles ? cleanBio(member.bio || previous?.bio || "") : previous?.bio || (peerId === state.peer?.id ? cleanBio(state.profileBio) : ""),
         presence: normalizePresence(member.presence || previous?.presence || (peerId === state.peer?.id ? state.presenceStatus : DEFAULT_PRESENCE)),
         offlineSnapshot: Boolean(member.offlineSnapshot),
       };
     });
     state.members = dedupeMembersByIdentity(rosterMembers);
+    applyPendingProfileMediaToMembers();
     const self = state.members.find((member) => member.peerId === state.peer?.id);
     if (self) {
       self.clientId = self.clientId || state.clientId;
@@ -2298,7 +2534,9 @@ function handleHostMessage(message) {
     previousScreenIds.forEach((peerId) => { if (!state.activeScreens.has(peerId) && peerId !== state.peer?.id) clearScreenStage(peerId); });
     ensureValidView(); renderServerUI(); renderMembers(); renderVoiceGrid(); renderScreenStage(); updateControlState();
     if (elements.serverDialog.open) renderServerSettings(); if (elements.memberDialog.open) renderMemberDialog();
-    if (message.includeProfiles) renderChatHistory(); reconcileVoiceCalls(); reconcileScreenCalls(); reconcileCameraCalls();
+    if (message.includeProfiles) renderChatHistory();
+    reconcileVoiceCalls(); reconcileScreenCalls(); reconcileCameraCalls();
+    if (state.inVoice) scheduleMediaReconcileBurst();
     if (state.resumeVoiceAfterReconnect && !state.inVoice && state.server.voiceChannel.exists) {
       state.resumeVoiceAfterReconnect = false;
       window.setTimeout(() => void joinVoiceChannel(), 250);
@@ -4495,7 +4733,18 @@ async function joinVoiceChannel() {
   }
   callSessions.beginSession("voice");
   state.voicePresenceRevision = normalizeVoicePresenceRevision(state.voicePresenceRevision) + 1;
-  state.inVoice = true; state.voiceJoinedAt = Date.now(); state.resumeVoiceAfterReconnect = false; applyLocalAudioState(); publishLocalStatus(); scheduleVoicePresenceSyncBurst(); reconcileVoiceCalls(); renderVoiceGrid(); updateControlState(); switchView("voice"); playUiSound("voiceJoin", 0.55); toast(`Você entrou em ${state.server.voiceChannel.name}.`);
+  state.inVoice = true; state.voiceJoinedAt = Date.now(); state.resumeVoiceAfterReconnect = false;
+  unlockUiAudio();
+  applyLocalAudioState();
+  publishLocalStatus();
+  scheduleVoicePresenceSyncBurst();
+  scheduleMediaReconcileBurst();
+  reconcileVoiceCalls();
+  renderVoiceGrid();
+  updateControlState();
+  switchView("voice");
+  playUiSound("voiceJoin", 0.55);
+  toast(`Você entrou em ${state.server.voiceChannel.name}.`);
 }
 
 function leaveVoiceChannel(options = {}) {
@@ -4834,6 +5083,8 @@ function reconcileVoiceCalls() {
         protocolVersion: CALL_PROTOCOL_VERSION,
         voiceSessionId: callSessions.sessionId("voice"),
         voicePresenceRevision: normalizeVoicePresenceRevision(state.voicePresenceRevision),
+        clientId: state.clientId,
+        nickname: state.nickname,
       },
     });
     if (call) registerVoiceCall(call, { direction: "outbound" });
@@ -4897,7 +5148,7 @@ function reconcileCameraCalls() {
   if (!state.cameraStream || !state.peer?.open || !state.inVoice) return;
   state.members.forEach((member) => {
     if (!member.inVoice || member.peerId === state.peer.id || state.cameraCallsOut.has(member.peerId)) return;
-    const call = state.peer.call(member.peerId, state.cameraStream, { metadata: { kind: "camera", protocolVersion: CALL_PROTOCOL_VERSION, voiceSessionId: callSessions.sessionId("voice"), cameraSessionId: callSessions.sessionId("camera"), cameraName: state.nickname } });
+    const call = state.peer.call(member.peerId, state.cameraStream, { metadata: { kind: "camera", protocolVersion: CALL_PROTOCOL_VERSION, voiceSessionId: callSessions.sessionId("voice"), cameraSessionId: callSessions.sessionId("camera"), cameraName: state.nickname, clientId: state.clientId } });
     if (!call) return;
     callSessions.adopt("cameraOut", member.peerId, call, { voiceSessionId: callSessions.sessionId("voice"), cameraSessionId: callSessions.sessionId("camera") });
     const ended = () => {
@@ -4922,7 +5173,7 @@ function scheduleCameraReconnect(peerId) {
 
 function handleIncomingCall(call) {
   if (String(call.metadata?.kind || "").startsWith("camera")) {
-    const member = state.members.find((item) => item.peerId === call.peer);
+    const member = memberForCloudIdentity(call.peer, call.metadata?.clientId);
     const remoteSessionId = normalizeMediaSessionId(call.metadata?.voiceSessionId);
     const remoteCameraSessionId = normalizeMediaSessionId(call.metadata?.cameraSessionId);
     const expectedRemoteSessionId = normalizeMediaSessionId(member?.voiceSessionId);
@@ -4942,7 +5193,7 @@ function handleIncomingCall(call) {
     call.on("close", ended); call.on("error", ended); return;
   }
   if (String(call.metadata?.kind || "").startsWith("screen")) {
-    const sharer = state.members.find((member) => member.peerId === call.peer);
+    const sharer = memberForCloudIdentity(call.peer, call.metadata?.clientId);
     const remoteSessionId = normalizeMediaSessionId(call.metadata?.screenSessionId);
     const announcedSessionId = normalizeMediaSessionId(state.activeScreens.get(call.peer)?.screenSessionId);
     const invalidSession = Boolean(remoteSessionId && announcedSessionId && remoteSessionId !== announcedSessionId);
@@ -4971,7 +5222,13 @@ function handleIncomingCall(call) {
     call.on("error", () => handleIncomingScreenDropped(call));
     return;
   }
-  const caller = state.members.find((member) => member.peerId === call.peer);
+  const caller = memberForCloudIdentity(call.peer, call.metadata?.clientId);
+  if (caller && caller.peerId !== call.peer && sanitizeClientId(call.metadata?.clientId) === caller.clientId) {
+    const oldPeerId = caller.peerId;
+    caller.peerId = call.peer;
+    closeCallsForPeer(oldPeerId);
+    state.activeScreens.delete(oldPeerId);
+  }
   const remoteSessionId = normalizeMediaSessionId(call.metadata?.voiceSessionId);
   const remoteRevision = normalizeVoicePresenceRevision(call.metadata?.voicePresenceRevision);
   const callerRevision = normalizeVoicePresenceRevision(caller?.voicePresenceRevision);
@@ -5716,9 +5973,11 @@ function beginScreenShare(stream) {
   state.activeScreens.set(state.peer.id, { peerId: state.peer.id, name: state.nickname, screenSessionId });
   state.activeScreen = state.activeScreens.values().next().value || null;
   showScreenStage(stream, state.nickname, true, { peerId: state.peer.id, screenSessionId, ...shareProfile() });
+  publishLocalStatus();
   announceScreenState(true);
   renderMembers();
   reconcileScreenCalls();
+  scheduleMediaReconcileBurst();
   updateControlState();
   playUiSound("screenStart", 0.52);
   const hasAudio = stream.getAudioTracks().length > 0;
@@ -5769,7 +6028,7 @@ function reconcileScreenCalls() {
   const profile = shareProfile();
   state.members.forEach((member) => {
     if (!member.inVoice || member.peerId === state.peer.id || state.screenCallsOut.has(member.peerId)) return;
-    const call = state.peer.call(member.peerId, state.screenStream, { metadata: { kind: "screen", protocolVersion: CALL_PROTOCOL_VERSION, screenSessionId: callSessions.sessionId("screen"), sharerName: state.nickname, quality: profile.quality, fps: profile.fps } });
+    const call = state.peer.call(member.peerId, state.screenStream, { metadata: { kind: "screen", protocolVersion: CALL_PROTOCOL_VERSION, screenSessionId: callSessions.sessionId("screen"), sharerName: state.nickname, clientId: state.clientId, quality: profile.quality, fps: profile.fps } });
     if (!call) return;
     callSessions.adopt("screenOut", member.peerId, call, { screenSessionId: callSessions.sessionId("screen") });
     tuneScreenCall(call);
@@ -6051,6 +6310,10 @@ function teardownConnections() {
   stopConnectionHealthMonitor();
   stopAllSpeakingDetectors();
   state.activitySoundInitialized = false;
+  window.clearTimeout(state.profileResyncTimer);
+  state.profileResyncTimer = null;
+  state.mediaReconcileTimers.forEach((timer) => window.clearTimeout(timer));
+  state.mediaReconcileTimers.clear();
   state.lastVoicePeers = new Set();
   state.lastScreenPeers = new Set();
   window.clearTimeout(state.reconnectTimer); window.clearTimeout(state.persistenceTimer);
