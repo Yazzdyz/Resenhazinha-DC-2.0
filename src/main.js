@@ -4,6 +4,7 @@ import {
   CALL_PROTOCOL_VERSION,
   CallSessionManager,
   dedupeMembersByIdentity,
+  shouldApplyVoicePresenceSnapshot,
   shouldInitiateVoiceCall,
 } from "./call-session-manager.js";
 
@@ -148,6 +149,7 @@ const state = {
   mutedBeforeDeafen: false,
   inVoice: false,
   voiceJoinedAt: null,
+  voicePresenceRevision: 0,
   resumeVoiceAfterReconnect: false,
   screenAudioMuted: false,
   screenVolume: 1,
@@ -1173,6 +1175,71 @@ function scheduleHostReconnect() {
   state.reconnectTimer = null;
 }
 
+function normalizeVoicePresenceRevision(value) {
+  const revision = Number(value);
+  return Number.isFinite(revision) && revision >= 0 ? Math.floor(revision) : 0;
+}
+
+function localVoicePresenceState() {
+  return {
+    muted: state.muted,
+    deafened: state.deafened,
+    inVoice: state.inVoice && state.server.voiceChannel.exists,
+    voiceJoinedAt: state.inVoice ? (normalizeVoiceJoinedAt(state.voiceJoinedAt) || Date.now()) : null,
+    voiceSessionId: state.inVoice ? callSessions.sessionId("voice") : "",
+    voicePresenceRevision: normalizeVoicePresenceRevision(state.voicePresenceRevision),
+    presence: normalizePresence(state.presenceStatus),
+  };
+}
+
+function scheduleVoicePresenceSyncBurst() {
+  const revision = normalizeVoicePresenceRevision(state.voicePresenceRevision);
+  [220, 800, 1800].forEach((delay) => {
+    window.setTimeout(() => {
+      if (!state.roomEntered || normalizeVoicePresenceRevision(state.voicePresenceRevision) !== revision) return;
+      publishLocalStatus();
+    }, delay);
+  });
+}
+
+function applyGuestVoiceStatus(peerId, message) {
+  const member = state.hostMembers.get(peerId);
+  if (!member) return false;
+
+  const currentRevision = normalizeVoicePresenceRevision(member.voicePresenceRevision);
+  const hasRevision = message?.voicePresenceRevision !== undefined && message?.voicePresenceRevision !== null;
+  const incomingRevision = hasRevision ? normalizeVoicePresenceRevision(message.voicePresenceRevision) : currentRevision;
+  if (incomingRevision < currentRevision) return false;
+
+  const wasInVoice = Boolean(member.inVoice);
+  const previousVoiceSessionId = normalizeMediaSessionId(member.voiceSessionId);
+  const previousMuted = Boolean(member.muted);
+  const previousDeafened = Boolean(member.deafened);
+  const nextInVoice = state.server.voiceChannel.exists && Boolean(message.inVoice);
+  const nextVoiceSessionId = nextInVoice ? normalizeMediaSessionId(message.voiceSessionId) : "";
+
+  member.deafened = Boolean(message.deafened);
+  member.muted = member.deafened || Boolean(message.muted);
+  member.inVoice = nextInVoice;
+  member.voiceJoinedAt = member.inVoice
+    ? normalizeVoiceJoinedAt(message.voiceJoinedAt) || (wasInVoice ? normalizeVoiceJoinedAt(member.voiceJoinedAt) : null) || Date.now()
+    : null;
+  member.voiceSessionId = nextVoiceSessionId;
+  member.voicePresenceRevision = incomingRevision;
+  if (message.presence) member.presence = normalizePresence(message.presence);
+
+  const sessionChanged = Boolean(previousVoiceSessionId && nextVoiceSessionId && previousVoiceSessionId !== nextVoiceSessionId);
+  const changed = wasInVoice !== member.inVoice
+    || previousVoiceSessionId !== nextVoiceSessionId
+    || previousMuted !== member.muted
+    || previousDeafened !== member.deafened;
+
+  rememberMember(member);
+  state.members = Array.from(state.hostMembers.values());
+  if (!member.inVoice || sessionChanged) closeCallsForPeer(peerId);
+  return changed;
+}
+
 function startConnectionHeartbeat() {
   window.clearInterval(state.heartbeatTimer);
   state.heartbeatTimer = null;
@@ -1180,7 +1247,7 @@ function startConnectionHeartbeat() {
   state.heartbeatTimer = window.setInterval(() => {
     const connection = state.hostConnection;
     if (!connection?.open) return;
-    try { connection.send({ type: "heartbeat", at: Date.now() }); } catch (_error) {}
+    try { connection.send({ type: "heartbeat", at: Date.now(), voiceState: localVoicePresenceState() }); } catch (_error) {}
   }, CONNECTION_HEARTBEAT_MS);
 }
 
@@ -1720,6 +1787,7 @@ async function enterRoom(mode) {
   state.joinInviteToken = parsedJoin.inviteToken;
   state.isHost = mode === "create" || mode === "resume-host";
   state.inVoice = false;
+  state.voicePresenceRevision = 0;
   state.serverMuted = false;
   state.currentView = "text";
   state.localStream = null;
@@ -1799,7 +1867,7 @@ function connectToHost(isReconnect = false) {
     window.clearTimeout(state.reconnectTimer);
     cancelHostDisconnectGrace();
     connection.send({ type: "join", nickname: state.nickname, bio: cleanBio(state.profileBio), presence: normalizePresence(state.presenceStatus), clientId: state.clientId, inviteToken: state.joinInviteToken });
-    connection.send({ type: "status", muted: state.muted, deafened: state.deafened, inVoice: state.inVoice, voiceJoinedAt: state.inVoice ? (normalizeVoiceJoinedAt(state.voiceJoinedAt) || Date.now()) : null, voiceSessionId: callSessions.sessionId("voice"), presence: normalizePresence(state.presenceStatus) });
+    connection.send({ type: "status", ...localVoicePresenceState() });
     startConnectionHeartbeat();
     window.setTimeout(sendOwnProfileMediaToHost, 60);
     if (!state.serverBinding) saveServerBinding({ roomCode: state.roomCode, inviteToken: state.joinInviteToken || state.server.inviteToken, isOwner: false, serverName: state.server.name });
@@ -1838,7 +1906,7 @@ function claimGuestIdentity(clientId, peerId) {
   let migratedMember = null;
   for (const [previousPeerId, previousMember] of [...state.hostMembers.entries()]) {
     if (previousPeerId === peerId || sanitizeClientId(previousMember.clientId) !== clientId) continue;
-    migratedMember ||= { ...previousMember, peerId, inVoice: false, voiceJoinedAt: null };
+    migratedMember ||= { ...previousMember, peerId, inVoice: false, voiceJoinedAt: null, voiceSessionId: "" };
     window.clearTimeout(state.guestDisconnectTimers.get(previousPeerId));
     state.guestDisconnectTimers.delete(previousPeerId);
     state.pendingGuestProfiles.delete(previousPeerId);
@@ -1901,8 +1969,10 @@ function acceptGuestConnection(connection) {
 function handleGuestMessage(peerId, message) {
   if (!message || typeof message !== "object") return;
   if (message.type === "heartbeat") {
+    const voiceChanged = message.voiceState ? applyGuestVoiceStatus(peerId, message.voiceState) : false;
     const connection = state.guestConnections.get(peerId);
     if (connection?.open) { try { connection.send({ type: "heartbeat-ack", at: message.at, serverAt: Date.now() }); } catch (_error) {} }
+    if (voiceChanged) broadcastRoster(false);
     return;
   }
   if (message.type === "member-left-server-v306") {
@@ -1945,21 +2015,7 @@ function handleGuestMessage(peerId, message) {
   if (message.type === "chat-reaction") acceptChatReaction(peerId, message.messageId, message.emoji);
   if (message.type === "attachment-request") void sendAttachmentToGuest(peerId, message.attachmentId);
   if (message.type === "status") {
-    const member = state.hostMembers.get(peerId);
-    if (member) {
-      const wasInVoice = Boolean(member.inVoice);
-      const previousVoiceSessionId = normalizeMediaSessionId(member.voiceSessionId);
-      member.deafened = Boolean(message.deafened);
-      member.muted = member.deafened || Boolean(message.muted);
-      member.inVoice = state.server.voiceChannel.exists && Boolean(message.inVoice);
-      if (member.inVoice) member.voiceJoinedAt = normalizeVoiceJoinedAt(message.voiceJoinedAt) || (wasInVoice ? normalizeVoiceJoinedAt(member.voiceJoinedAt) : null) || Date.now();
-      else member.voiceJoinedAt = null;
-      member.voiceSessionId = member.inVoice ? normalizeMediaSessionId(message.voiceSessionId) : "";
-      if (message.presence) member.presence = normalizePresence(message.presence);
-      rememberMember(member); state.members = Array.from(state.hostMembers.values());
-      if (!member.inVoice || (previousVoiceSessionId && member.voiceSessionId && previousVoiceSessionId !== member.voiceSessionId)) closeCallsForPeer(peerId);
-      broadcastRoster(false);
-    }
+    if (applyGuestVoiceStatus(peerId, message)) broadcastRoster(false);
   }
   if (message.type === "admin-action") applyAdminAction(peerId, message.action, message.payload);
   if (message.type === "screen-started") {
@@ -1984,6 +2040,14 @@ function handleGuestMessage(peerId, message) {
 function handleHostMessage(message) {
   if (!message || typeof message !== "object") return;
   if (message.type === "heartbeat-ack") return;
+  if (message.type === "force-voice-leave") {
+    const incomingRevision = normalizeVoicePresenceRevision(message.voicePresenceRevision);
+    if (shouldApplyVoicePresenceSnapshot(state.voicePresenceRevision, incomingRevision)) {
+      state.voicePresenceRevision = incomingRevision;
+      if (state.inVoice) leaveVoiceChannel({ forced: true, message: "Você foi removido da call por um ADM." });
+    }
+    return;
+  }
   if (message.type === "server-deleted-v306") {
     const serverName = cleanServerName(message.serverName || state.server?.name || state.serverBinding?.serverName || "servidor");
     clearServerBinding();
@@ -2044,6 +2108,8 @@ function handleHostMessage(message) {
         muted: Boolean(member.muted), deafened: Boolean(member.deafened), serverMuted: Boolean(member.serverMuted), inVoice: Boolean(member.inVoice) && state.server.voiceChannel.exists,
         voiceJoinedAt: Boolean(member.inVoice) ? normalizeVoiceJoinedAt(member.voiceJoinedAt) : null,
         voiceSessionId: Boolean(member.inVoice) ? normalizeMediaSessionId(member.voiceSessionId) : "",
+        voicePresenceRevision: normalizeVoicePresenceRevision(member.voicePresenceRevision ?? previous?.voicePresenceRevision),
+        voicePresenceExplicit: member.voicePresenceRevision !== undefined && member.voicePresenceRevision !== null,
         sessionStartedAt: Number(member.sessionStartedAt) || 0,
         roleIds: normalizeRoleIds(member.roleIds),
         avatar: previous?.avatar || (peerId === state.peer?.id ? state.avatarData : null),
@@ -2055,7 +2121,28 @@ function handleHostMessage(message) {
     });
     state.members = dedupeMembersByIdentity(rosterMembers);
     const self = state.members.find((member) => member.peerId === state.peer?.id);
-    if (self) { self.clientId = self.clientId || state.clientId; state.inVoice = self.inVoice; state.voiceJoinedAt = self.inVoice ? (normalizeVoiceJoinedAt(self.voiceJoinedAt) || state.voiceJoinedAt || Date.now()) : null; state.serverMuted = self.serverMuted; applyLocalAudioState(); }
+    if (self) {
+      self.clientId = self.clientId || state.clientId;
+      const localRevision = normalizeVoicePresenceRevision(state.voicePresenceRevision);
+      const incomingRevision = normalizeVoicePresenceRevision(self.voicePresenceRevision);
+      const authoritativeVoiceState = !wasLocallyInVoice
+        || !state.server.voiceChannel.exists
+        || (self.voicePresenceExplicit && shouldApplyVoicePresenceSnapshot(localRevision, incomingRevision));
+
+      if (authoritativeVoiceState) {
+        state.voicePresenceRevision = Math.max(localRevision, incomingRevision);
+        state.inVoice = self.inVoice;
+        state.voiceJoinedAt = self.inVoice ? (normalizeVoiceJoinedAt(self.voiceJoinedAt) || state.voiceJoinedAt || Date.now()) : null;
+      } else {
+        self.inVoice = state.inVoice && state.server.voiceChannel.exists;
+        self.voiceJoinedAt = self.inVoice ? (normalizeVoiceJoinedAt(state.voiceJoinedAt) || Date.now()) : null;
+        self.voiceSessionId = self.inVoice ? callSessions.sessionId("voice") : "";
+        self.voicePresenceRevision = localRevision;
+      }
+      state.serverMuted = self.serverMuted;
+      applyLocalAudioState();
+    }
+    state.members.forEach((member) => { delete member.voicePresenceExplicit; });
     if (wasLocallyInVoice && !state.inVoice) {
       if (state.screenStream) stopScreenShare();
       if (state.cameraStream) stopCamera();
@@ -2178,6 +2265,7 @@ function broadcastRoster(includeProfiles = false) {
       inVoice: Boolean(member.inVoice) && state.server.voiceChannel.exists,
       voiceJoinedAt: member.inVoice ? normalizeVoiceJoinedAt(member.voiceJoinedAt) : null,
       voiceSessionId: member.inVoice ? normalizeMediaSessionId(member.voiceSessionId) : "",
+      voicePresenceRevision: normalizeVoicePresenceRevision(member.voicePresenceRevision),
       sessionStartedAt: Number(member.sessionStartedAt) || 0,
       roleIds: member.roleIds || ["membro"],
       presence: normalizePresence(member.presence),
@@ -2346,7 +2434,26 @@ function applyAdminAction(requesterPeerId, action, payload = {}) {
   }
   if (action === "disconnect-voice") {
     const target = state.hostMembers.get(String(payload.peerId || ""));
-    if (target && target.inVoice && canModerateTarget(requesterPeerId, target)) { target.inVoice = false; if (target.peerId === state.peer.id) { state.inVoice = false; applyLocalAudioState(); } state.activeScreens.delete(target.peerId); state.activeScreen = state.activeScreens.values().next().value || null; clearScreenStage(target.peerId); recordModeration(requesterPeerId, `tirou ${target.name} da call`); changed = true; }
+    if (target && target.inVoice && canModerateTarget(requesterPeerId, target)) {
+      target.voicePresenceRevision = normalizeVoicePresenceRevision(target.voicePresenceRevision) + 1;
+      target.inVoice = false;
+      target.voiceJoinedAt = null;
+      target.voiceSessionId = "";
+      closeCallsForPeer(target.peerId);
+      const targetConnection = state.guestConnections.get(target.peerId);
+      if (targetConnection?.open) targetConnection.send({ type: "force-voice-leave", voicePresenceRevision: target.voicePresenceRevision });
+      if (target.peerId === state.peer.id) {
+        state.voicePresenceRevision = target.voicePresenceRevision;
+        state.inVoice = false;
+        state.voiceJoinedAt = null;
+        applyLocalAudioState();
+      }
+      state.activeScreens.delete(target.peerId);
+      state.activeScreen = state.activeScreens.values().next().value || null;
+      clearScreenStage(target.peerId);
+      recordModeration(requesterPeerId, `tirou ${target.name} da call`);
+      changed = true;
+    }
   }
   if (action === "kick-server") {
     const targetPeerId = String(payload.peerId || "");
@@ -4263,15 +4370,18 @@ async function joinVoiceChannel() {
     return;
   }
   callSessions.beginSession("voice");
-  state.inVoice = true; state.voiceJoinedAt = Date.now(); state.resumeVoiceAfterReconnect = false; applyLocalAudioState(); publishLocalStatus(); reconcileVoiceCalls(); renderVoiceGrid(); updateControlState(); switchView("voice"); playUiSound("voiceJoin", 0.55); toast(`Você entrou em ${state.server.voiceChannel.name}.`);
+  state.voicePresenceRevision = normalizeVoicePresenceRevision(state.voicePresenceRevision) + 1;
+  state.inVoice = true; state.voiceJoinedAt = Date.now(); state.resumeVoiceAfterReconnect = false; applyLocalAudioState(); publishLocalStatus(); scheduleVoicePresenceSyncBurst(); reconcileVoiceCalls(); renderVoiceGrid(); updateControlState(); switchView("voice"); playUiSound("voiceJoin", 0.55); toast(`Você entrou em ${state.server.voiceChannel.name}.`);
 }
 
-function leaveVoiceChannel() {
+function leaveVoiceChannel(options = {}) {
   if (!state.inVoice) { switchView(state.server.textChannel.exists ? "text" : "voice"); return; }
+  const forced = Boolean(options?.forced);
   if (state.screenStream) stopScreenShare();
   if (state.cameraStream) stopCamera();
   if (state.deafened) state.muted = Boolean(state.mutedBeforeDeafen);
   state.deafened = false; state.mutedBeforeDeafen = false;
+  if (!forced) state.voicePresenceRevision = normalizeVoicePresenceRevision(state.voicePresenceRevision) + 1;
   state.inVoice = false;
   state.voiceJoinedAt = null;
   callSessions.endSession("voice");
@@ -4285,10 +4395,10 @@ function leaveVoiceChannel() {
   elements.audioContainer.replaceChildren();
   stopAllSpeakingDetectors();
   stopMicrophoneCapture();
-  publishLocalStatus(); renderVoiceGrid(); updateControlState();
+  publishLocalStatus(); scheduleVoicePresenceSyncBurst(); renderVoiceGrid(); updateControlState();
   playUiSound("voiceLeave", 0.55);
   if (state.server.textChannel.exists) switchView("text");
-  toast("Você saiu da call e continuou no servidor pelo chat.");
+  toast(options?.message || "Você saiu da call e continuou no servidor pelo chat.");
 }
 
 function resizeChatInput() {
@@ -4490,11 +4600,11 @@ function sanitizeIncomingChatMessage(message) {
 }
 
 function localMember() {
-  const member = memberFrom(state.peer.id, state.nickname, state.muted, state.avatarData, state.clientId, state.bannerData, state.profileBio, state.presenceStatus); member.deafened = state.deafened; member.serverMuted = state.serverMuted; member.inVoice = state.inVoice && state.server.voiceChannel.exists; member.voiceJoinedAt = member.inVoice ? (normalizeVoiceJoinedAt(state.voiceJoinedAt) || Date.now()) : null; member.voiceSessionId = member.inVoice ? callSessions.sessionId("voice") : ""; const remembered = registryRecordFor(state.clientId); member.roleIds = state.isHost ? normalizeRoleIds([...(remembered?.roleIds || ["membro"]), "admin"]) : normalizeRoleIds(remembered?.roleIds || ["membro"]); return member;
+  const member = memberFrom(state.peer.id, state.nickname, state.muted, state.avatarData, state.clientId, state.bannerData, state.profileBio, state.presenceStatus); member.deafened = state.deafened; member.serverMuted = state.serverMuted; member.inVoice = state.inVoice && state.server.voiceChannel.exists; member.voiceJoinedAt = member.inVoice ? (normalizeVoiceJoinedAt(state.voiceJoinedAt) || Date.now()) : null; member.voiceSessionId = member.inVoice ? callSessions.sessionId("voice") : ""; member.voicePresenceRevision = normalizeVoicePresenceRevision(state.voicePresenceRevision); const remembered = registryRecordFor(state.clientId); member.roleIds = state.isHost ? normalizeRoleIds([...(remembered?.roleIds || ["membro"]), "admin"]) : normalizeRoleIds(remembered?.roleIds || ["membro"]); return member;
 }
 
 
-function memberFrom(peerId, name, muted = false, avatar = null, clientId = "", banner = null, bio = "", presence = DEFAULT_PRESENCE) { return { peerId, clientId: sanitizeClientId(clientId), name, muted: Boolean(muted), deafened: false, serverMuted: false, inVoice: false, voiceJoinedAt: null, voiceSessionId: "", sessionStartedAt: Date.now(), avatar, banner: sanitizeProfileBanner(banner), bio: cleanBio(bio), presence: normalizePresence(presence), roleIds: ["membro"] }; }
+function memberFrom(peerId, name, muted = false, avatar = null, clientId = "", banner = null, bio = "", presence = DEFAULT_PRESENCE) { return { peerId, clientId: sanitizeClientId(clientId), name, muted: Boolean(muted), deafened: false, serverMuted: false, inVoice: false, voiceJoinedAt: null, voiceSessionId: "", voicePresenceRevision: 0, sessionStartedAt: Date.now(), avatar, banner: sanitizeProfileBanner(banner), bio: cleanBio(bio), presence: normalizePresence(presence), roleIds: ["membro"] }; }
 
 
 function openRoomView() {
@@ -4601,6 +4711,7 @@ function reconcileVoiceCalls() {
         kind: "voice",
         protocolVersion: CALL_PROTOCOL_VERSION,
         voiceSessionId: callSessions.sessionId("voice"),
+        voicePresenceRevision: normalizeVoicePresenceRevision(state.voicePresenceRevision),
       },
     });
     if (call) registerVoiceCall(call, { direction: "outbound" });
@@ -4740,16 +4851,34 @@ function handleIncomingCall(call) {
   }
   const caller = state.members.find((member) => member.peerId === call.peer);
   const remoteSessionId = normalizeMediaSessionId(call.metadata?.voiceSessionId);
-  const expectedRemoteSessionId = normalizeMediaSessionId(caller?.voiceSessionId);
+  const remoteRevision = normalizeVoicePresenceRevision(call.metadata?.voicePresenceRevision);
+  const callerRevision = normalizeVoicePresenceRevision(caller?.voicePresenceRevision);
+  let expectedRemoteSessionId = normalizeMediaSessionId(caller?.voiceSessionId);
+
+  // A própria oferta WebRTC é uma prova mais nova de presença que um roster
+  // atrasado. Isso evita que dois usuários entrem na call e cada lado continue
+  // se vendo sozinho até o próximo roster.
+  if (caller && !caller.offlineSnapshot && remoteSessionId && shouldApplyVoicePresenceSnapshot(callerRevision, remoteRevision)) {
+    if (!caller.inVoice || !expectedRemoteSessionId || expectedRemoteSessionId !== remoteSessionId) {
+      caller.inVoice = true;
+      caller.voiceJoinedAt = normalizeVoiceJoinedAt(caller.voiceJoinedAt) || Date.now();
+      caller.voiceSessionId = remoteSessionId;
+      caller.voicePresenceRevision = Math.max(callerRevision, remoteRevision);
+      expectedRemoteSessionId = remoteSessionId;
+      renderMembers();
+      renderVoiceGrid();
+    }
+  }
+
   const invalidSession = Boolean(remoteSessionId && expectedRemoteSessionId && remoteSessionId !== expectedRemoteSessionId);
   const wrongDirection = shouldInitiateVoiceCall(state.peer?.id, call.peer);
-  if (!state.inVoice || !state.server.voiceChannel.exists || !caller?.inVoice || invalidSession || wrongDirection || state.voiceCalls.has(call.peer)) {
+  if (!state.inVoice || !state.server.voiceChannel.exists || !caller || caller.offlineSnapshot || (!caller.inVoice && !remoteSessionId) || invalidSession || wrongDirection || state.voiceCalls.has(call.peer)) {
     call.close();
     if (wrongDirection) window.setTimeout(reconcileVoiceCalls, 0);
     return;
   }
   call.answer(state.localStream || new MediaStream());
-  registerVoiceCall(call, { direction: "inbound", remoteSessionId });
+  registerVoiceCall(call, { direction: "inbound", remoteSessionId, remoteRevision });
 }
 
 function handleIncomingCameraDropped(call) {
@@ -5082,16 +5211,34 @@ function applyAllPlaybackAudioSettings() {
 
 function publishLocalStatus() {
   if (!state.peer?.open) return;
+  const voiceState = localVoicePresenceState();
   if (state.isHost) {
     const member = state.hostMembers.get(state.peer.id);
     if (member) {
-      member.muted = state.muted; member.deafened = state.deafened; member.inVoice = state.inVoice && state.server.voiceChannel.exists; member.voiceJoinedAt = member.inVoice ? (normalizeVoiceJoinedAt(state.voiceJoinedAt) || Date.now()) : null; member.voiceSessionId = member.inVoice ? callSessions.sessionId("voice") : ""; member.serverMuted = state.serverMuted; member.presence = normalizePresence(state.presenceStatus); rememberMember(member);
+      member.muted = state.muted;
+      member.deafened = state.deafened;
+      member.inVoice = voiceState.inVoice;
+      member.voiceJoinedAt = voiceState.voiceJoinedAt;
+      member.voiceSessionId = voiceState.voiceSessionId;
+      member.voicePresenceRevision = voiceState.voicePresenceRevision;
+      member.serverMuted = state.serverMuted;
+      member.presence = normalizePresence(state.presenceStatus);
+      rememberMember(member);
     }
     broadcastRoster(false); scheduleServerPersistence();
   } else if (state.hostConnection?.open) {
-    state.hostConnection.send({ type: "status", muted: state.muted, deafened: state.deafened, inVoice: state.inVoice, voiceJoinedAt: state.inVoice ? (normalizeVoiceJoinedAt(state.voiceJoinedAt) || Date.now()) : null, voiceSessionId: state.inVoice ? callSessions.sessionId("voice") : "", presence: normalizePresence(state.presenceStatus) });
+    state.hostConnection.send({ type: "status", ...voiceState });
     const self = state.members.find((member) => member.peerId === state.peer.id);
-    if (self) { self.muted = state.muted; self.deafened = state.deafened; self.inVoice = state.inVoice; self.voiceJoinedAt = self.inVoice ? (normalizeVoiceJoinedAt(state.voiceJoinedAt) || Date.now()) : null; self.serverMuted = state.serverMuted; self.presence = normalizePresence(state.presenceStatus); }
+    if (self) {
+      self.muted = state.muted;
+      self.deafened = state.deafened;
+      self.inVoice = voiceState.inVoice;
+      self.voiceJoinedAt = voiceState.voiceJoinedAt;
+      self.voiceSessionId = voiceState.voiceSessionId;
+      self.voicePresenceRevision = voiceState.voicePresenceRevision;
+      self.serverMuted = state.serverMuted;
+      self.presence = normalizePresence(state.presenceStatus);
+    }
     renderMembers(); renderVoiceGrid(); reconcileVoiceCalls(); reconcileCameraCalls();
   }
 }
