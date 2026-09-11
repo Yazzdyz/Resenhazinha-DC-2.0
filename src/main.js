@@ -1430,7 +1430,7 @@ function applyCloudVoicePresence(message) {
   if (previousPeerId && previousPeerId !== peerId) {
     callSessions.cancelRetries("voice", previousPeerId);
     callSessions.cancelRetries("screen", previousPeerId);
-    closeCallsForPeer(previousPeerId);
+    closeCallsForPeer(previousPeerId, { closeCloud: false });
     clearScreenStage(previousPeerId);
     state.activeScreens.delete(previousPeerId);
   }
@@ -5360,7 +5360,7 @@ function refreshMemberPeerForCall(call) {
     member.peerId = call.peer;
 
     if (oldPeerId) {
-      closeCallsForPeer(oldPeerId);
+      closeCallsForPeer(oldPeerId, { closeCloud: false });
       const screen = state.activeScreens.get(oldPeerId);
       if (screen) {
         state.activeScreens.delete(oldPeerId);
@@ -6558,9 +6558,9 @@ function clearScreenStage(peerId) {
 }
 
 
-function closeCallsForPeer(peerId) {
+function closeCallsForPeer(peerId, options = {}) {
   const member = state.members.find((item) => item.peerId === peerId);
-  if (member?.clientId) {
+  if (options.closeCloud !== false && member?.clientId) {
     cloudRtc.close("voice", member.clientId, { notify: false, reason: "peer-close" });
     cloudRtc.close("screen", member.clientId, { notify: false, reason: "peer-close" });
   }
