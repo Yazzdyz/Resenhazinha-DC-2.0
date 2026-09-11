@@ -1,5 +1,14 @@
 # Atualizações do Resenhazinha
 
+## 4.4.2
+
+- Restaura apenas a reconexão da sinalização PeerJS, sem sair da call e sem fechar streams.
+- Corrige o cenário em que Cloudflare/roster funcionavam, mas voz e tela não conseguiam iniciar novas conexões WebRTC.
+- Antes de entrar na call, compartilhar tela ou ligar câmera, o app verifica se a sinalização de mídia está pronta.
+- Se o PeerJS cair, ele reconecta silenciosamente e refaz apenas a negociação necessária.
+- Diagnóstico agora diferencia Cloudflare conectado de sinalização de mídia indisponível.
+
+
 ## 4.4.1
 
 - Corrige negociação de voz e tela após a migração para o servidor Cloudflare.
