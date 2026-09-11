@@ -1,5 +1,14 @@
 # Atualizações do Resenhazinha
 
+## 4.5.2
+
+- Mantém uma ordem estável para os membros da call em todos os clientes.
+- Quem estiver compartilhando tela ganha prioridade e aparece no topo.
+- Remove o timer individual ao lado de cada pessoa.
+- Mantém somente o timer geral do canal de voz.
+- Nenhuma alteração no áudio, WebRTC, Cloudflare ou transmissão.
+
+
 ## 4.5.1
 
 - Foco exclusivo no áudio da call.
