@@ -1,5 +1,17 @@
 # Atualizações do Resenhazinha
 
+## 4.5.0
+
+- Voz e compartilhamento de tela deixam de usar PeerJS MediaCall.
+- Sinalização WebRTC (offer/answer/ICE) passa pelo Cloudflare Worker que já é o servidor central.
+- A mídia continua P2P entre os computadores através de RTCPeerConnection nativo.
+- Conexões de voz usam clientId estável para escolher um único iniciador e evitar chamadas duplicadas.
+- Compartilhamento de tela usa o mesmo relay de sinalização Cloudflare e não depende mais do 0.peerjs.com para criar a conexão.
+- Mantém STUN/TURN equivalentes aos usados pelo PeerJS 1.5.5 para atravessar NAT quando necessário.
+- Adiciona timeout de negociação e nova tentativa controlada caso offer/answer não complete.
+- PeerJS permanece temporariamente apenas para câmera/compatibilidade, fora do caminho de voz e tela.
+
+
 ## 4.4.3
 
 - Simplifica a aceitação de chamadas WebRTC para o comportamento estável das versões antigas.
