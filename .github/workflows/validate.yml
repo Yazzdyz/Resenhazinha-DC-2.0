@@ -1,9 +1,9 @@
-name: Validar desenvolvimento do Resenhazinha
+name: Validar projeto
 
 on:
   push:
     branches:
-      - "release/**"
+      - main
   pull_request:
     branches:
       - main
@@ -17,7 +17,9 @@ concurrency:
 
 jobs:
   check:
+    name: Testes, sintaxe e build
     runs-on: windows-latest
+
     steps:
       - name: Baixar código
         uses: actions/checkout@v4
@@ -31,5 +33,5 @@ jobs:
       - name: Instalar dependências
         run: npm ci
 
-      - name: Rodar testes e validar build
+      - name: Validar projeto
         run: npm run check

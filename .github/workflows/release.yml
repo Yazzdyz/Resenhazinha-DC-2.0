@@ -1,25 +1,19 @@
-name: Publicar versão do Resenhazinha
+name: Publicar versão
 
 on:
   push:
-    branches: [main]
-    paths-ignore:
-      - ".github/inspect/**"
-      - ".github/workflows/inspect-patched.yml"
-  workflow_dispatch:
-
+    tags:
+      - "v*.*.*"
 permissions:
   contents: write
 
 concurrency:
-  group: release-main
+  group: release-${{ github.ref }}
   cancel-in-progress: false
-
-env:
-  APP_VERSION: "5.1.1"
 
 jobs:
   windows-release:
+    name: Validar e publicar para Windows
     runs-on: windows-latest
 
     steps:
@@ -32,53 +26,56 @@ jobs:
           node-version: "22"
           cache: npm
 
-      - name: Conferir versão declarada
+      - name: Conferir versão
+        id: version
         shell: pwsh
         run: |
-          $packageVersion = node -p "require('./package.json').version"
-          if ($packageVersion -ne $env:APP_VERSION) {
-            throw "package.json ($packageVersion) e APP_VERSION ($env:APP_VERSION) estão diferentes."
+          $version = node -p "require('./package.json').version"
+          $expectedTag = "v$version"
+
+          if ("${{ github.event_name }}" -eq "push" -and "${{ github.ref_name }}" -ne $expectedTag) {
+            throw "A tag ${{ github.ref_name }} não corresponde à versão $version do package.json."
           }
 
-      - name: Instalar dependências reproduzíveis
+          "value=$version" >> $env:GITHUB_OUTPUT
+          "tag=$expectedTag" >> $env:GITHUB_OUTPUT
+
+      - name: Instalar dependências
         run: npm ci
 
-      - name: Validar sessões de call e bundle
+      - name: Testar e validar
         run: npm run check
 
-      - name: Montar Setup do Windows
+      - name: Montar instalador
         run: npm run package:win
 
-      - name: Garantir tag da versão
-        shell: pwsh
-        run: |
-          $tag = "v$env:APP_VERSION"
-          git fetch --tags --force
-          if (-not (git tag --list $tag)) {
-            git tag $tag $env:GITHUB_SHA
-            git push origin $tag
-          }
-
-      - name: Publicar arquivos da atualização
+      - name: Publicar Release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.value }}
+          TAG: ${{ steps.version.outputs.tag }}
         run: |
-          $tag = "v$env:APP_VERSION"
-          gh release view $tag --repo "${{ github.repository }}" *> $null
+          gh release view $env:TAG --repo "${{ github.repository }}" *> $null
           if ($LASTEXITCODE -ne 0) {
-            gh release create $tag --repo "${{ github.repository }}" --target $env:GITHUB_SHA --title "Resenhazinha $tag" --notes "v5.1.1: corrige os botões GIF/emoji do chat e refaz o perfil em dois níveis, com popout compacto e perfil completo centralizado."
+            gh release create $env:TAG `
+              --repo "${{ github.repository }}" `
+              --target "${{ github.sha }}" `
+              --title "Resenhazinha $env:TAG" `
+              --generate-notes
           }
-          gh release upload $tag `
-            "release/Resenhazinha-Setup-$env:APP_VERSION.exe" `
-            "release/Resenhazinha-Setup-$env:APP_VERSION.exe.blockmap" `
-            "release/latest.yml" `
-            --repo "${{ github.repository }}" --clobber
 
-      - name: Guardar instalador como artefato do Actions
+          gh release upload $env:TAG `
+            "release/Resenhazinha-Setup-$env:VERSION.exe" `
+            "release/Resenhazinha-Setup-$env:VERSION.exe.blockmap" `
+            "release/latest.yml" `
+            --repo "${{ github.repository }}" `
+            --clobber
+
+      - name: Guardar instalador no Actions
         uses: actions/upload-artifact@v4
         with:
-          name: Resenhazinha-Setup-${{ env.APP_VERSION }}
+          name: Resenhazinha-Setup-${{ steps.version.outputs.value }}
           path: |
             release/Resenhazinha-Setup-*.exe
             release/Resenhazinha-Setup-*.exe.blockmap

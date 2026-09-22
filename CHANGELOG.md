@@ -1,4 +1,8 @@
-# v5.1.1
+# Histórico de versões
+
+As mudanças mais importantes do Resenhazinha são registradas aqui. Para baixar o aplicativo, use sempre a [versão mais recente](https://github.com/Yazzdyz/Resenhazinha-DC-2.0/releases/latest).
+
+## v5.1.1
 
 - Corrige o bug visual que escondia o botão GIF atrás do botão de enviar.
 - Adiciona botão de emoji funcional ao lado do GIF no compositor do chat.
@@ -7,7 +11,7 @@
 - Clicar no avatar ou nome do popout agora abre um perfil completo centralizado.
 - Perfil completo mostra banner, avatar, status, cargos, servidor e atividade atual.
 
-# v5.1.0
+## v5.1.0
 
 - Captura de áudio contínua do Windows: novos aplicativos entram no compartilhamento sem reiniciar a transmissão.
 - O áudio do próprio Resenhazinha/call continua protegido na rota padrão.
@@ -16,16 +20,14 @@
 - Preview ao vivo da transmissão ao passar o mouse por quem está compartilhando.
 - Botão GIF no chat com painel de busca e GIFs em alta do Tenor.
 
-# v5.0.0
+## v5.0.0
 
 - Clicar no canal de voz agora entra diretamente na call.
 - O compartilhamento com som passa a detectar dinamicamente aplicativos abertos depois do início da transmissão.
 - Maior teto de bitrate para 720p, 1080p e 1440p, com prioridade alta para o vídeo e preferência por fluidez em 60 FPS.
 - Mantém as melhorias preparadas na 4.5.2: ordem estável dos membros, transmissor no topo, sem timers individuais e apenas timer geral da call.
 
-# Atualizações do Resenhazinha
-
-## 4.5.2
+## v4.5.2
 
 - Mantém uma ordem estável para os membros da call em todos os clientes.
 - Quem estiver compartilhando tela ganha prioridade e aparece no topo.
@@ -34,7 +36,7 @@
 - Nenhuma alteração no áudio, WebRTC, Cloudflare ou transmissão.
 
 
-## 4.5.1
+## v4.5.1
 
 - Foco exclusivo no áudio da call.
 - A voz enviada pelo WebRTC passa a usar a captura bruta do microfone, sem depender do MediaStreamDestination do processamento local.
@@ -45,7 +47,7 @@
 - Nenhuma alteração em tela, Cloudflare, roster ou servidor.
 
 
-## 4.5.0
+## v4.5.0
 
 - Voz e compartilhamento de tela deixam de usar PeerJS MediaCall.
 - Sinalização WebRTC (offer/answer/ICE) passa pelo Cloudflare Worker que já é o servidor central.
@@ -57,7 +59,7 @@
 - PeerJS permanece temporariamente apenas para câmera/compatibilidade, fora do caminho de voz e tela.
 
 
-## 4.4.3
+## v4.4.3
 
 - Simplifica a aceitação de chamadas WebRTC para o comportamento estável das versões antigas.
 - Voz e tela não são mais bloqueadas por diferença de sessionId antes do primeiro stream remoto existir.
@@ -67,7 +69,7 @@
 - Adiciona diagnóstico de estados ICE/WebRTC para identificar falhas de rota se ainda houver problema.
 
 
-## 4.4.2
+## v4.4.2
 
 - Restaura apenas a reconexão da sinalização PeerJS, sem sair da call e sem fechar streams.
 - Corrige o cenário em que Cloudflare/roster funcionavam, mas voz e tela não conseguiam iniciar novas conexões WebRTC.
@@ -76,7 +78,7 @@
 - Diagnóstico agora diferencia Cloudflare conectado de sinalização de mídia indisponível.
 
 
-## 4.4.1
+## v4.4.1
 
 - Corrige negociação de voz e tela após a migração para o servidor Cloudflare.
 - Presença de voz e compartilhamento recebem eventos dedicados do Worker, sem depender só do timing do roster.
@@ -88,7 +90,7 @@
 - Fechamento de uma sessão antiga não apaga o estado de uma conexão nova.
 
 
-## 4.4.0
+## v4.4.0
 
 - Cloudflare Worker + Durable Object volta a ser a autoridade do servidor.
 - O servidor continua online mesmo com o PC do Owner fechado.
@@ -99,7 +101,7 @@
 - Chat, anexos, reações e perfis voltam a usar o backend persistente.
 
 
-## 4.3.1
+## v4.3.1
 
 - Corrige o bug em que duas pessoas entravam na call mas cada uma aparecia sozinha.
 - Roster atrasado não consegue mais cancelar uma entrada de voz mais nova.
@@ -108,7 +110,7 @@
 - Remoção por ADM continua autoritativa através de revisão de presença.
 
 
-## 4.3.0
+## v4.3.0
 
 - Call reconstruída com uma única sessão de voz por pessoa.
 - Presença deduplicada pela identidade estável da instalação.
