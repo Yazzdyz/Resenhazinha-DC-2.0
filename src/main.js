@@ -130,7 +130,7 @@ const state = {
   memberAudioNodes: new Map(),
   screenAudioNodes: new Map(),
   microphoneTest: null,
-  noiseSuppressionLevel: normalizeNoiseSuppressionLevel(localStorage.getItem(NOISE_SUPPRESSION_KEY) || "medium"),
+  noiseSuppressionLevel: normalizeNoiseSuppressionLevel(localStorage.getItem(NOISE_SUPPRESSION_KEY) || "standard"),
   screenStream: null,
   screenSources: [],
   screenSourceFilter: "all",
@@ -597,7 +597,10 @@ document.addEventListener("pointerdown", primeUiSounds, { once: true, passive: t
 document.addEventListener("keydown", primeUiSounds, { once: true });
 
 function normalizeNoiseSuppressionLevel(value) {
-  return ["off", "light", "medium", "high"].includes(String(value)) ? String(value) : "medium";
+  const normalized = String(value || "").toLowerCase();
+  // Migra os presets antigos sem quebrar quem já tinha uma preferência salva.
+  if (normalized === "light" || normalized === "medium") return "standard";
+  return ["off", "standard", "high"].includes(normalized) ? normalized : "standard";
 }
 
 function uiSoundElement(kind) {
@@ -3407,9 +3410,8 @@ function renderNoiseSuppressionNote() {
   const level = normalizeNoiseSuppressionLevel(elements.noiseSuppressionSelect.value);
   const notes = {
     off: "Desligada: sem supressão de ruído e sem ganho automático. O cancelamento de eco continua ativo.",
-    light: "Leve: usa apenas a supressão nativa do Chromium/Windows para manter a voz mais natural.",
-    medium: "Média: supressão nativa + corte de graves + gate adaptativo suave para ventilador, teclado distante e ruído constante.",
-    high: "Alta: processamento mais agressivo, gate mais fechado e isolamento de voz quando o sistema oferece suporte. Pode cortar fala muito baixa.",
+    standard: "Padrão: processamento nativo do Chromium/WebRTC, com cancelamento de eco, redução de ruído e ganho automático. Prioriza uma voz natural.",
+    high: "Alta: adiciona filtro e gate adaptativo ao processamento nativo para ambientes mais barulhentos. Pode cortar fala muito baixa.",
   };
   elements.noiseLevelNote.textContent = notes[level];
 }
@@ -5536,32 +5538,35 @@ async function createMicrophoneCapture(deviceId = state.microphoneDeviceId, leve
     await context.resume();
     const source = context.createMediaStreamSource(rawStream);
     let tail = source;
-    let processing = level === "off" ? "off" : "native";
+    let processing = level === "off" ? "off" : "native-standard";
 
-    if (level === "medium" || level === "high") {
+    // O preset Padrão fica propositalmente no DSP nativo do Chromium/WebRTC.
+    // Isso evita o efeito "porta fechando" do noise gate em finais de palavras
+    // e mantém a voz mais natural, como o uso Standard esperado em apps de voz.
+    if (level === "high") {
       try {
         await context.audioWorklet.addModule("./mic-noise-worklet.js");
         const highpass = context.createBiquadFilter();
         highpass.type = "highpass";
-        highpass.frequency.value = level === "high" ? 115 : 85;
-        highpass.Q.value = 0.72;
+        highpass.frequency.value = 110;
+        highpass.Q.value = 0.7;
         const lowpass = context.createBiquadFilter();
         lowpass.type = "lowpass";
-        lowpass.frequency.value = level === "high" ? 7200 : 9000;
-        lowpass.Q.value = 0.55;
-        const gate = new AudioWorkletNode(context, "resenhazinha-noise-gate", { processorOptions: { level } });
+        lowpass.frequency.value = 7600;
+        lowpass.Q.value = 0.5;
+        const gate = new AudioWorkletNode(context, "resenhazinha-noise-gate", { processorOptions: { level: "high" } });
         const compressor = context.createDynamicsCompressor();
-        compressor.threshold.value = level === "high" ? -34 : -31;
+        compressor.threshold.value = -34;
         compressor.knee.value = 14;
-        compressor.ratio.value = level === "high" ? 4 : 3;
-        compressor.attack.value = 0.003;
-        compressor.release.value = level === "high" ? 0.16 : 0.22;
+        compressor.ratio.value = 3.5;
+        compressor.attack.value = 0.004;
+        compressor.release.value = 0.2;
         source.connect(highpass).connect(lowpass).connect(gate).connect(compressor);
         tail = compressor;
-        processing = `native+adaptive-${level}`;
+        processing = "native+adaptive-high";
       } catch (workletError) {
         console.warn("[Resenhazinha] Filtro extra de ruído indisponível; usando supressão nativa.", workletError);
-        processing = "native-fallback";
+        processing = "native-standard-fallback";
       }
     }
 
