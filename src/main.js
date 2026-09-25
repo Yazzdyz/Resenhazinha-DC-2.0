@@ -10,6 +10,7 @@ import {
   CloudRtcManager,
   shouldInitiateCloudRtc,
 } from "./cloud-rtc.js";
+import { VoiceSfuManager } from "./voice-sfu.js";
 import {
   CALL_PROTOCOL_VERSION,
   CallSessionManager,
@@ -95,6 +96,8 @@ const state = {
   members: [],
   voiceCalls: callSessions.map("voice"),
   voiceStats: new Map(),
+  voiceTransportState: { state: "disconnected", configured: null },
+  voiceTransportStats: null,
   cameraCallsOut: callSessions.map("cameraOut"),
   cameraCallsIn: callSessions.map("cameraIn"),
   cameraStreams: new Map(),
@@ -262,6 +265,44 @@ const cloudRtc = new CloudRtcManager({
       if (kind === "voice") reconcileVoiceCalls();
       if (kind === "screen") reconcileScreenCalls();
     }, 900);
+  },
+});
+
+const voiceSfu = new VoiceSfuManager({
+  send: (payload) => {
+    if (!state.hostConnection?.open) throw new Error("cloud-offline");
+    state.hostConnection.send(payload);
+  },
+  // O SFU recebe o stream processado (ganho/supressão) em vez de ignorar
+  // as configurações de áudio e publicar sempre o microfone cru.
+  getVoiceStream: () => state.localStream || state.rawMicrophoneStream,
+  getSelfClientId: () => state.clientId,
+  getMembers: () => state.members,
+  onRemoteStream: (reference, stream) => {
+    const member = state.members.find((item) => item.clientId === reference.clientId);
+    const peerId = member?.peerId || reference.peerId || reference.clientId;
+    reference.peerId = peerId;
+    void attachCloudRemoteAudio(peerId, stream);
+  },
+  onRemoteRemoved: (reference) => {
+    const member = state.members.find((item) => item.clientId === reference.clientId);
+    const peerId = member?.peerId || reference.peerId;
+    if (peerId) removeRemoteAudio(peerId);
+  },
+  onState: (detail) => {
+    state.voiceTransportState = { ...detail, updatedAt: Date.now() };
+    state.cloudRtcStates.set("voice-sfu", state.voiceTransportState);
+    console.info("[Resenhazinha VoiceSFU]", detail);
+    renderVoiceConnectionPanel();
+  },
+  onStats: (stats) => {
+    const total = Math.max(0, Number(stats.packetsReceived || 0) + Number(stats.packetsLost || 0));
+    state.voiceTransportStats = {
+      ...stats,
+      lossPercent: total ? Math.max(0, (Number(stats.packetsLost || 0) / total) * 100) : 0,
+      updatedAt: Date.now(),
+    };
+    renderVoiceConnectionPanel();
   },
 });
 
@@ -2572,6 +2613,8 @@ function handleHostMessage(message) {
   if (!message || typeof message !== "object") return;
   if (message.type === "heartbeat-ack") return;
 
+  if (voiceSfu.handleMessage(message)) return;
+
   if (message.type === "signal") {
     void cloudRtc.handleSignal(message);
     return;
@@ -3231,11 +3274,17 @@ function closeDiagnostics() {
 
 function diagnosticsStatusLabel() {
   if (!state.hostConnection?.open) return "Reconectando ao Cloudflare";
+  if (voiceSfu.usesSfuPath()) {
+    const phase = state.voiceTransportState?.state || "connecting";
+    if (phase === "connected") return "Cloudflare conectado · Realtime SFU";
+    if (phase === "recovering") return "Cloudflare conectado · SFU recuperando";
+    return "Cloudflare conectado · negociando SFU";
+  }
   const active = cloudRtc.list("voice").some((entry) => entry.pc.connectionState === "connected");
   if (state.inVoice && !active && state.members.some((member) => member.inVoice && member.clientId !== state.clientId)) {
     return "Cloudflare conectado · negociando WebRTC";
   }
-  return "Cloudflare conectado · WebRTC nativo";
+  return "Cloudflare conectado · WebRTC P2P (fallback)";
 }
 
 async function refreshDiagnostics() {
@@ -4947,6 +4996,18 @@ function refreshVoiceDurationLabels() {
 
 function voiceConnectionSummary() {
   if (!state.inVoice) return { quality: "unknown", rttMs: null, title: "Fora da call" };
+  if (voiceSfu.usesSfuPath()) {
+    const phase = state.voiceTransportState?.state || "connecting";
+    const stats = state.voiceTransportStats;
+    if (phase === "recovering") return { quality: "medium", rttMs: stats?.rttMs ?? null, title: "Reconectando a voz pela edge da Cloudflare…" };
+    if (phase !== "connected") return { quality: "unknown", rttMs: null, title: "Conectando ao servidor de voz…" };
+    const rtt = Number.isFinite(stats?.rttMs) ? stats.rttMs : null;
+    const loss = Number(stats?.lossPercent || 0);
+    const jitter = Number(stats?.jitterMs || 0);
+    const quality = loss >= 5 || jitter >= 50 || (rtt != null && rtt >= 250) ? "bad" : loss >= 2 || jitter >= 30 || (rtt != null && rtt >= 140) ? "medium" : "good";
+    const title = rtt == null ? "Conectado · Cloudflare Realtime SFU" : `${rtt} ms · SFU · perda ${loss.toFixed(1)}% · jitter ${jitter || 0} ms`;
+    return { quality, rttMs: rtt, title };
+  }
   const activePeerIds = new Set(state.members.filter((member) => member.inVoice && member.peerId !== state.peer?.id).map((member) => member.peerId));
   const stats = [...state.voiceStats.values()].filter((stat) => activePeerIds.has(stat.peerId) && Date.now() - Number(stat.updatedAt || 0) < 20_000);
   if (!activePeerIds.size) return { quality: "good", rttMs: null, title: "Conectado · entre outra pessoa para medir o ping P2P" };
@@ -5478,6 +5539,7 @@ async function restartMicrophoneStream() {
     if (sender && newTrack) replacements.push(sender.replaceTrack(newTrack).catch(() => undefined));
   });
   await Promise.all(replacements);
+  if (newTrack) await voiceSfu.replaceTrack(newTrack).catch((error) => console.warn("[Resenhazinha VoiceSFU] Não consegui trocar a track do microfone.", error));
   stopMicrophoneCapture(previous);
   publishLocalStatus();
 }
@@ -5497,6 +5559,12 @@ async function joinVoiceChannel() {
   applyLocalAudioState();
   publishLocalStatus();
   scheduleVoicePresenceSyncBurst();
+  try {
+    await voiceSfu.start();
+  } catch (error) {
+    console.warn("[Resenhazinha VoiceSFU] A conexão principal de voz entrou em recuperação.", error);
+    toast("A voz está reconectando ao servidor. A call continua aberta.", "error");
+  }
   scheduleMediaReconcileBurst();
   reconcileVoiceCalls();
   renderVoiceGrid();
@@ -5518,6 +5586,7 @@ function leaveVoiceChannel(options = {}) {
   state.voiceJoinedAt = null;
   callSessions.endSession("voice");
   callSessions.endSession("screen");
+  void voiceSfu.stop({ notify: true });
   cloudRtc.closeAll("voice", { notify: true, reason: "voice-leave" });
   cloudRtc.closeAll("screen", { notify: true, reason: "voice-leave" });
   applyLocalAudioState();
@@ -5832,9 +5901,19 @@ function reconcileVoiceCalls() {
     && member.clientId
     && member.clientId !== state.clientId
   );
+
+  // No modo SFU existe somente uma conexão de publicação e uma de recepção
+  // com a edge da Cloudflare. Nunca criamos a malha P2P ao mesmo tempo.
+  if (voiceSfu.usesSfuPath()) {
+    cloudRtc.closeAll("voice", { notify: false, reason: "sfu-primary" });
+    if (state.inVoice && state.localStream && state.hostConnection?.open) {
+      void voiceSfu.syncParticipants(state.members);
+    }
+    return;
+  }
+
   const activeClientIds = new Set(activeMembers.map((member) => member.clientId));
   cloudRtc.closeMissing("voice", activeClientIds);
-
   if (!state.inVoice || !state.localStream || !state.hostConnection?.open) return;
 
   activeMembers.forEach((member) => {
@@ -7187,6 +7266,7 @@ function closeCallsForPeer(peerId, options = {}) {
 }
 
 function closeAllMediaCalls() {
+  void voiceSfu.stop({ notify: Boolean(state.hostConnection?.open) });
   cloudRtc.closeAll(null, { notify: true, reason: "media-close-all" });
   state.cloudRtcStates.clear();
   callSessions.endSession("voice");
@@ -7213,6 +7293,7 @@ function cleanupMedia() {
   state.activeScreens.clear();
   state.screenStreams.clear();
   state.cameraStreams.clear();
+  void voiceSfu.stop({ notify: false });
   cloudRtc.closeAll(null, { notify: false, reason: "cleanup" });
   state.cloudRtcStates.clear();
   callSessions.closeAll();
