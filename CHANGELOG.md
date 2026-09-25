@@ -2,6 +2,18 @@
 
 As mudanças mais importantes do Resenhazinha são registradas aqui. Para baixar o aplicativo, use sempre a [versão mais recente](https://github.com/Yazzdyz/Resenhazinha-DC-2.0/releases/latest).
 
+## v5.2.0
+
+- Migra a voz principal da call para Cloudflare Realtime SFU, reduzindo a malha P2P entre participantes.
+- Adiciona recuperação de sessão de voz por geração após reconexões, evitando negociações antigas e conexões duplicadas.
+- O SFU envia o microfone processado e acompanha ping, jitter e perda de pacotes no diagnóstico.
+- Mantém fallback automático para a voz P2P anterior quando o SFU não estiver disponível.
+- Mantém compartilhamento de tela e câmera no transporte atual.
+- Adiciona prévia real de imagens no compositor antes de enviar por clique, arrastar ou Ctrl+V.
+- Simplifica a supressão de ruído para Desligada, Padrão e Alta.
+- O modo Padrão usa o processamento nativo do Chromium/WebRTC para preservar uma voz mais natural, sem o noise gate extra.
+- Presets antigos Leve e Média migram automaticamente para Padrão.
+
 ## v5.1.1
 
 - Corrige o bug visual que escondia o botão GIF atrás do botão de enviar.
