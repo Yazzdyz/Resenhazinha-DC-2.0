@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   windows-release:
-    if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.event.head_commit.message, 'release: prepare v')
+    if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.event.head_commit.message, 'release')
     name: Validar e publicar para Windows
     runs-on: windows-latest
 
