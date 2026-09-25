@@ -2428,6 +2428,12 @@ function connectToHost(isReconnect = false) {
     });
     connection.send({ type: "status", ...localVoicePresenceState() });
 
+    // Uma queda curta do WebSocket de controle não deve deixar a mídia presa
+    // numa geração antiga do Durable Object. Refazemos somente o transporte SFU.
+    if (isReconnect && state.inVoice && voiceSfu.usesSfuPath()) {
+      window.setTimeout(() => voiceSfu.onControlReconnect(), 180);
+    }
+
     startConnectionHeartbeat();
     window.setTimeout(sendOwnProfileMediaToHost, 120);
 
