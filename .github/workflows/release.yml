@@ -2,6 +2,8 @@ name: Publicar versão
 
 on:
   push:
+    branches:
+      - "main"
     tags:
       - "v*.*.*"
 permissions:
@@ -13,6 +15,7 @@ concurrency:
 
 jobs:
   windows-release:
+    if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.event.head_commit.message, 'release: prepare v')
     name: Validar e publicar para Windows
     runs-on: windows-latest
 
@@ -33,7 +36,7 @@ jobs:
           $version = node -p "require('./package.json').version"
           $expectedTag = "v$version"
 
-          if ("${{ github.event_name }}" -eq "push" -and "${{ github.ref_name }}" -ne $expectedTag) {
+          if ("${{ github.ref }}" -like "refs/tags/*" -and "${{ github.ref_name }}" -ne $expectedTag) {
             throw "A tag ${{ github.ref_name }} não corresponde à versão $version do package.json."
           }
 
