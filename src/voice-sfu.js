@@ -84,6 +84,7 @@ export class VoiceSfuManager {
     this.recoveryAttempt = 0;
     this.statsTimer = null;
     this.closed = false;
+    this.lifecycleId = 0;
   }
 
   usesSfuPath() {
@@ -147,6 +148,7 @@ export class VoiceSfuManager {
   async start() {
     this.intentActive = true;
     this.closed = false;
+    const lifecycleId = ++this.lifecycleId;
     this._emitState("connecting");
     const configured = await this.probe();
     if (!this.intentActive) return false;
@@ -156,8 +158,8 @@ export class VoiceSfuManager {
     }
 
     try {
-      await this._openGeneration();
-      return true;
+      await this._openGeneration(lifecycleId);
+      return this._isCurrentLifecycle(lifecycleId);
     } catch (error) {
       console.error("[Resenhazinha VoiceSFU] Falha ao iniciar.", error);
       this._scheduleRecovery(error?.code || "start-failed", true);
@@ -165,15 +167,27 @@ export class VoiceSfuManager {
     }
   }
 
-  async _openGeneration() {
+  async _openGeneration(lifecycleId = this.lifecycleId) {
+    if (!this._isCurrentLifecycle(lifecycleId)) return;
     this._closePeers();
     this.active = false;
     this.referencesByMid.clear();
     this._clearRemoteStreams();
     this._emitState(this.recoveryAttempt ? "recovering" : "connecting");
 
-    const join = await this._request("join", {});
-    if (!this.intentActive) return;
+    let join;
+    try {
+      join = await this._request("join", {});
+    } catch (error) {
+      // O status "entrei na call" e o pedido do SFU viajam pelo mesmo WebSocket.
+      // Em reconnects muito rápidos, damos uma chance curta para o status chegar
+      // antes de recriar toda a mídia.
+      if (error?.code !== "voice_sfu_not_in_voice" || !this._isCurrentLifecycle(lifecycleId)) throw error;
+      await wait(140);
+      if (!this._isCurrentLifecycle(lifecycleId)) return;
+      join = await this._request("join", {});
+    }
+    if (!this._isCurrentLifecycle(lifecycleId)) return;
     this.generation = Number(join.generation) || 0;
     if (!this.generation) throw new Error("voice-sfu-generation-missing");
 
@@ -192,6 +206,7 @@ export class VoiceSfuManager {
     const offer = await this.producer.createOffer();
     await this.producer.setLocalDescription(offer);
     await waitForIceGathering(this.producer);
+    if (!this._isCurrentLifecycle(lifecycleId)) return;
     if (transceiver.mid === null) throw new Error("voice-sfu-mid-missing");
 
     const published = await this._request("publish", {
@@ -199,7 +214,9 @@ export class VoiceSfuManager {
       mid: transceiver.mid,
       sessionDescription: sessionDescription(this.producer.localDescription, "offer"),
     });
+    if (!this._isCurrentLifecycle(lifecycleId)) return;
     await this.producer.setRemoteDescription(published.sessionDescription);
+    if (!this._isCurrentLifecycle(lifecycleId)) return;
 
     this.active = true;
     this.recoveryAttempt = 0;
@@ -268,6 +285,18 @@ export class VoiceSfuManager {
     }
   }
 
+  onControlReconnect() {
+    if (!this.intentActive || this.configured !== true) return;
+    this.lifecycleId += 1;
+    this._cancelPending("voice_sfu_control_reconnected");
+    clearTimeout(this.recoveryTimer);
+    this.recoveryTimer = null;
+    this.active = false;
+    this._closePeers();
+    this._clearRemoteStreams();
+    this._scheduleRecovery("control-reconnect", true);
+  }
+
   async replaceTrack(track) {
     if (!track || track.kind !== "audio") return false;
     if (this.publisherSender && this.intentActive && this.configured === true) {
@@ -282,6 +311,8 @@ export class VoiceSfuManager {
     this.intentActive = false;
     this.active = false;
     this.closed = true;
+    this.lifecycleId += 1;
+    this._cancelPending("voice_sfu_stopped");
     clearTimeout(this.recoveryTimer);
     this.recoveryTimer = null;
     this.recoveryAttempt = 0;
@@ -354,13 +385,29 @@ export class VoiceSfuManager {
     this.recoveryTimer = setTimeout(async () => {
       this.recoveryTimer = null;
       if (!this.intentActive) return;
+      const lifecycleId = this.lifecycleId;
       try {
-        await this._openGeneration();
+        await this._openGeneration(lifecycleId);
       } catch (error) {
         console.warn("[Resenhazinha VoiceSFU] Reconexão falhou.", error);
         this._scheduleRecovery(error?.code || "reconnect-failed");
       }
     }, delay);
+  }
+
+  _isCurrentLifecycle(lifecycleId) {
+    return this.intentActive && lifecycleId === this.lifecycleId;
+  }
+
+  _cancelPending(code = "voice_sfu_cancelled") {
+    for (const [requestId, pending] of this.pending) {
+      clearTimeout(pending.timer);
+      const error = new Error(code);
+      error.code = code;
+      error.retryable = true;
+      pending.reject(error);
+      this.pending.delete(requestId);
+    }
   }
 
   _closePeers() {
