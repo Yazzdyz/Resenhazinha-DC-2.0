@@ -10,7 +10,7 @@
     "dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
     "build": "vite build",
     "test": "node --test tests/*.test.mjs",
-    "check": "npm test && node --check src/main.js && node --check src/cloud-control.js && node --check src/cloud-rtc.js && node --check src/call-session-manager.js && node --check electron/main.cjs && node --check electron/preload.cjs && npm run build",
+    "check": "npm test && node --check src/main.js && node --check src/cloud-control.js && node --check src/cloud-rtc.js && node --check src/voice-sfu.js && node --check src/call-session-manager.js && node --check electron/main.cjs && node --check electron/preload.cjs && npm run build",
     "start": "electron .",
     "package:win": "npm run build && electron-builder --win nsis --x64 --publish never"
   },
@@ -32,7 +32,9 @@
     "productName": "Resenhazinha",
     "asar": true,
     "npmRebuild": false,
-    "directories": { "output": "release" },
+    "directories": {
+      "output": "release"
+    },
     "files": [
       "dist/**/*",
       "electron/**/*",
@@ -45,11 +47,24 @@
       "!*.zip"
     ],
     "extraResources": [
-      { "from": "node_modules/loopback-capture/build/Release/loopback_capture_addon.node", "to": "loopback_capture_addon.node" },
-      { "from": "THIRD_PARTY_NOTICES.txt", "to": "THIRD_PARTY_NOTICES.txt" }
+      {
+        "from": "node_modules/loopback-capture/build/Release/loopback_capture_addon.node",
+        "to": "loopback_capture_addon.node"
+      },
+      {
+        "from": "THIRD_PARTY_NOTICES.txt",
+        "to": "THIRD_PARTY_NOTICES.txt"
+      }
     ],
     "win": {
-      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
       "icon": "public/icon.ico",
       "artifactName": "Resenhazinha-Setup-${version}.${ext}"
     },
@@ -62,12 +77,14 @@
       "runAfterFinish": true,
       "deleteAppDataOnUninstall": false
     },
-    "publish": [{
-      "provider": "github",
-      "owner": "Yazzdyz",
-      "repo": "Resenhazinha-DC-2.0",
-      "releaseType": "release",
-      "tagNamePrefix": "v"
-    }]
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Yazzdyz",
+        "repo": "Resenhazinha-DC-2.0",
+        "releaseType": "release",
+        "tagNamePrefix": "v"
+      }
+    ]
   }
 }
