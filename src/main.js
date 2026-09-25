@@ -64,6 +64,7 @@ const UI_SOUND_URLS = {
 };
 const uiSoundPool = new Map();
 let uiFallbackAudioContext = null;
+let chatFileDragDepth = 0;
 const PEER_OPTIONS = {
   host: "0.peerjs.com",
   port: 443,
@@ -474,6 +475,11 @@ elements.gifSearchInput?.addEventListener("input", scheduleGifSearch);
 elements.gifSearchInput?.addEventListener("keydown", (event) => { if (event.key === "Escape") { event.preventDefault(); closeGifPicker(); focusChatComposer(); } });
 elements.chatEmojiButton?.addEventListener("click", (event) => { event.stopPropagation(); toggleEmojiPicker(); });
 elements.chatFileInput.addEventListener("change", () => setPendingChatFiles([...elements.chatFileInput.files]));
+elements.chatInput.addEventListener("paste", handleChatImagePaste);
+elements.textView.addEventListener("dragenter", handleChatFileDragEnter);
+elements.textView.addEventListener("dragover", handleChatFileDragOver);
+elements.textView.addEventListener("dragleave", handleChatFileDragLeave);
+elements.textView.addEventListener("drop", handleChatFileDrop);
 elements.chatInput.addEventListener("input", () => { resizeChatInput(); updateMentionMenu(); });
 elements.chatInput.addEventListener("click", updateMentionMenu);
 elements.chatInput.addEventListener("keyup", (event) => { if (!["ArrowUp", "ArrowDown", "Enter", "Tab", "Escape"].includes(event.key)) updateMentionMenu(); });
@@ -4070,17 +4076,76 @@ function kickSelectedMemberFromServer() { const member = state.members.find((ite
 function setPendingChatFiles(files) {
   const next = [...state.pendingChatFiles];
   let rejectedLarge = false;
+  let rejectedLimit = false;
+  let accepted = 0;
   for (const file of files || []) {
     if (!(file instanceof File)) continue;
     if (file.size > MAX_CHAT_ATTACHMENT_BYTES) { rejectedLarge = true; continue; }
-    if (next.length >= MAX_CHAT_ATTACHMENTS) break;
+    if (next.length >= MAX_CHAT_ATTACHMENTS) { rejectedLimit = true; continue; }
     next.push(file);
+    accepted += 1;
   }
   state.pendingChatFiles = next.slice(0, MAX_CHAT_ATTACHMENTS);
   elements.chatFileInput.value = "";
   if (rejectedLarge) toast("Cada arquivo pode ter no máximo 25 MB.", "error");
-  if ((files || []).length + next.length > MAX_CHAT_ATTACHMENTS) toast(`Dá para mandar até ${MAX_CHAT_ATTACHMENTS} arquivos por mensagem.`);
+  if (rejectedLimit) toast(`Dá para mandar até ${MAX_CHAT_ATTACHMENTS} arquivos por mensagem.`);
   renderPendingChatFiles();
+  return accepted;
+}
+function chatCanReceiveFiles() {
+  return state.currentView === "text" && state.server.textChannel.exists && !state.chatSending;
+}
+
+function chatDragHasFiles(event) {
+  return [...(event.dataTransfer?.types || [])].includes("Files");
+}
+
+function clearChatFileDragState() {
+  chatFileDragDepth = 0;
+  elements.textView.classList.remove("is-file-dragging");
+}
+
+function handleChatFileDragEnter(event) {
+  if (!chatCanReceiveFiles() || !chatDragHasFiles(event)) return;
+  event.preventDefault();
+  chatFileDragDepth += 1;
+  elements.textView.classList.add("is-file-dragging");
+}
+
+function handleChatFileDragOver(event) {
+  if (!chatCanReceiveFiles() || !chatDragHasFiles(event)) return;
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+}
+
+function handleChatFileDragLeave(event) {
+  if (!chatDragHasFiles(event)) return;
+  chatFileDragDepth = Math.max(0, chatFileDragDepth - 1);
+  if (chatFileDragDepth === 0) elements.textView.classList.remove("is-file-dragging");
+}
+
+function handleChatFileDrop(event) {
+  if (!chatDragHasFiles(event)) return;
+  event.preventDefault();
+  const files = [...(event.dataTransfer?.files || [])];
+  clearChatFileDragState();
+  const accepted = setPendingChatFiles(files);
+  if (accepted) {
+    toast(`${accepted} arquivo${accepted === 1 ? "" : "s"} pronto${accepted === 1 ? "" : "s"} para enviar.`);
+    focusChatComposer();
+  }
+}
+
+function handleChatImagePaste(event) {
+  if (!chatCanReceiveFiles()) return;
+  const images = [...(event.clipboardData?.items || [])]
+    .filter((item) => item.kind === "file" && String(item.type || "").startsWith("image/"))
+    .map((item) => item.getAsFile())
+    .filter(Boolean);
+  if (!images.length) return;
+  event.preventDefault();
+  const accepted = setPendingChatFiles(images);
+  if (accepted) toast(`${accepted === 1 ? "Imagem colada" : `${accepted} imagens coladas`} e pronta${accepted === 1 ? "" : "s"} para enviar.`);
 }
 
 function renderPendingChatFiles() {
@@ -4770,13 +4835,18 @@ function renderChatAttachments(container, message) {
   const attachments = sanitizeChatAttachments(message.attachments); if (!attachments.length) return;
   const list = document.createElement("div"); list.className = "chat-attachments";
   attachments.forEach((meta) => {
-    const card = document.createElement("div"); card.className = `chat-attachment chat-attachment--${attachmentKind(meta)}`; card.dataset.attachmentId = meta.id;
+    const kind = attachmentKind(meta);
+    const card = document.createElement("div"); card.className = `chat-attachment chat-attachment--${kind}`; card.dataset.attachmentId = meta.id;
     const preview = document.createElement("div"); preview.className = "chat-attachment-preview";
-    if (attachmentKind(meta) === "file") { const fileIcon = document.createElement("span"); fileIcon.className = "chat-file-icon"; fileIcon.textContent = attachmentExtension(meta.name) || "FILE"; preview.append(fileIcon); }
+    if (kind === "file") { const fileIcon = document.createElement("span"); fileIcon.className = "chat-file-icon"; fileIcon.textContent = attachmentExtension(meta.name) || "FILE"; preview.append(fileIcon); }
     else { const loading = document.createElement("div"); loading.className = "chat-attachment-loading"; loading.textContent = "Carregando…"; preview.append(loading); void hydrateAttachmentPreview(meta, preview); }
-    const footer = document.createElement("div"); footer.className = "chat-attachment-footer"; const copy = document.createElement("div"); const name = document.createElement("strong"); name.textContent = meta.name; name.title = meta.name; const size = document.createElement("small"); size.textContent = formatFileSize(meta.size); copy.append(name, size);
+    card.append(preview);
+    if (kind !== "image") {
+      const footer = document.createElement("div"); footer.className = "chat-attachment-footer"; const copy = document.createElement("div"); const name = document.createElement("strong"); name.textContent = meta.name; name.title = meta.name; const size = document.createElement("small"); size.textContent = formatFileSize(meta.size); copy.append(name, size);
     const download = document.createElement("button"); download.type = "button"; download.className = "chat-attachment-download"; download.title = "Baixar arquivo"; download.setAttribute("aria-label", `Baixar ${meta.name}`); download.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>'; download.addEventListener("click", () => void downloadChatAttachment(meta));
-    footer.append(copy, download); card.append(preview, footer); list.append(card);
+      footer.append(copy, download); card.append(footer);
+    }
+    list.append(card);
   });
   container.append(list);
 }
