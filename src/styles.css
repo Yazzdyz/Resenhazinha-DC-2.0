@@ -3013,6 +3013,24 @@ textarea:focus-visible {
   background: #111113;
   padding: 6px 7px;
 }
+.chat-pending-file--image {
+  min-width: 230px;
+  grid-template-columns: 72px minmax(0,1fr) 24px;
+  padding: 6px;
+}
+.chat-pending-file-preview {
+  width: 72px;
+  height: 72px;
+  overflow: hidden;
+  border-radius: 7px;
+  background: #09090a;
+}
+.chat-pending-file-preview img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
 .chat-pending-file-icon {
   display: grid;
   width: 34px;
@@ -3025,10 +3043,15 @@ textarea:focus-visible {
   font-weight: 900;
   letter-spacing: .06em;
 }
-.chat-pending-file > div { min-width: 0; display: grid; gap: 2px; }
+.chat-pending-file-preview .chat-pending-file-icon {
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+}
+.chat-pending-file-copy { min-width: 0; display: grid; gap: 2px; }
 .chat-pending-file strong { overflow: hidden; color: #d7d7db; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .chat-pending-file small { color: #68686f; font-size: 8px; }
-.chat-pending-file > button {
+.chat-pending-file-remove {
   width: 22px;
   height: 22px;
   border: 0;
@@ -3038,7 +3061,7 @@ textarea:focus-visible {
   cursor: pointer;
   font-size: 17px;
 }
-.chat-pending-file > button:hover { background: #252529; color: #fff; }
+.chat-pending-file-remove:hover { background: #252529; color: #fff; }
 .chat-form--full textarea { padding-left: 48px; padding-right: 48px; }
 .chat-form .chat-attachment-button {
   right: auto;
