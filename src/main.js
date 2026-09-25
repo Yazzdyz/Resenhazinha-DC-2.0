@@ -4222,15 +4222,67 @@ function handleChatImagePaste(event) {
   if (accepted) toast(`${accepted === 1 ? "Imagem colada" : `${accepted} imagens coladas`} e pronta${accepted === 1 ? "" : "s"} para enviar.`);
 }
 
+function pendingChatFileIsImage(file) {
+  if (!file) return false;
+  if (String(file.type || "").startsWith("image/")) return true;
+  return /\.(?:avif|bmp|gif|jfif|jpe?g|png|webp)$/i.test(String(file.name || ""));
+}
+
 function renderPendingChatFiles() {
   elements.chatPendingFiles.replaceChildren();
   elements.chatPendingFiles.hidden = state.pendingChatFiles.length === 0;
   state.pendingChatFiles.forEach((file, index) => {
-    const chip = document.createElement("div"); chip.className = "chat-pending-file";
-    const icon = document.createElement("span"); icon.className = "chat-pending-file-icon"; icon.textContent = file.type.startsWith("image/") ? "IMG" : file.type.startsWith("video/") ? "VID" : "ARQ";
-    const copy = document.createElement("div"); const name = document.createElement("strong"); name.textContent = file.name; const size = document.createElement("small"); size.textContent = formatFileSize(file.size); copy.append(name, size);
-    const remove = document.createElement("button"); remove.type = "button"; remove.setAttribute("aria-label", `Remover ${file.name}`); remove.textContent = "×"; remove.addEventListener("click", () => { state.pendingChatFiles.splice(index, 1); renderPendingChatFiles(); });
-    chip.append(icon, copy, remove); elements.chatPendingFiles.append(chip);
+    const chip = document.createElement("div");
+    chip.className = `chat-pending-file${pendingChatFileIsImage(file) ? " chat-pending-file--image" : ""}`;
+
+    let visual;
+    if (pendingChatFileIsImage(file)) {
+      visual = document.createElement("div");
+      visual.className = "chat-pending-file-preview";
+      const image = document.createElement("img");
+      image.alt = file.name || "Prévia da imagem";
+      image.draggable = false;
+      const previewUrl = URL.createObjectURL(file);
+      const releasePreviewUrl = () => URL.revokeObjectURL(previewUrl);
+      image.addEventListener("load", releasePreviewUrl, { once: true });
+      image.addEventListener("error", () => {
+        releasePreviewUrl();
+        visual.replaceChildren();
+        const fallback = document.createElement("span");
+        fallback.className = "chat-pending-file-icon";
+        fallback.textContent = "IMG";
+        visual.append(fallback);
+      }, { once: true });
+      image.src = previewUrl;
+      visual.append(image);
+    } else {
+      visual = document.createElement("span");
+      visual.className = "chat-pending-file-icon";
+      visual.textContent = file.type.startsWith("video/") ? "VID" : "ARQ";
+    }
+
+    const copy = document.createElement("div");
+    copy.className = "chat-pending-file-copy";
+    const name = document.createElement("strong");
+    name.textContent = file.name;
+    name.title = file.name;
+    const size = document.createElement("small");
+    size.textContent = formatFileSize(file.size);
+    copy.append(name, size);
+
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "chat-pending-file-remove";
+    remove.setAttribute("aria-label", `Remover ${file.name}`);
+    remove.title = "Remover anexo";
+    remove.textContent = "×";
+    remove.addEventListener("click", () => {
+      state.pendingChatFiles.splice(index, 1);
+      renderPendingChatFiles();
+    });
+
+    chip.append(visual, copy, remove);
+    elements.chatPendingFiles.append(chip);
   });
 }
 
