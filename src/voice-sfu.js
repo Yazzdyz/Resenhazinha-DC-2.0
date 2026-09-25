@@ -162,6 +162,7 @@ export class VoiceSfuManager {
       return this._isCurrentLifecycle(lifecycleId);
     } catch (error) {
       console.error("[Resenhazinha VoiceSFU] Falha ao iniciar.", error);
+      if (this._fallBackOnConfigurationError(error)) return false;
       this._scheduleRecovery(error?.code || "start-failed", true);
       throw error;
     }
@@ -390,6 +391,7 @@ export class VoiceSfuManager {
         await this._openGeneration(lifecycleId);
       } catch (error) {
         console.warn("[Resenhazinha VoiceSFU] Reconexão falhou.", error);
+        if (this._fallBackOnConfigurationError(error)) return;
         this._scheduleRecovery(error?.code || "reconnect-failed");
       }
     }, delay);
@@ -397,6 +399,19 @@ export class VoiceSfuManager {
 
   _isCurrentLifecycle(lifecycleId) {
     return this.intentActive && lifecycleId === this.lifecycleId;
+  }
+
+  _fallBackOnConfigurationError(error) {
+    if (!["voice_sfu_not_configured", "voice_sfu_credentials_invalid"].includes(String(error?.code || ""))) return false;
+    this.configured = false;
+    this.active = false;
+    clearTimeout(this.recoveryTimer);
+    this.recoveryTimer = null;
+    this._stopStats();
+    this._closePeers();
+    this._clearRemoteStreams();
+    this._emitState("fallback", { configured: false, reason: error.code });
+    return true;
   }
 
   _cancelPending(code = "voice_sfu_cancelled") {
