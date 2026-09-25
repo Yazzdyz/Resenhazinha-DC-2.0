@@ -135,7 +135,7 @@ export class VoiceSfuManager {
   async probe() {
     if (this.configured !== null) return this.configured;
     try {
-      const result = await this._request("capabilities", {}, 5_000);
+      const result = await this._request("capabilities", {}, 1_800);
       this.configured = Boolean(result.configured && result.protocolVersion >= 1);
     } catch {
       this.configured = false;
