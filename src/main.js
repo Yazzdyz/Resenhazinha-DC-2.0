@@ -3296,17 +3296,32 @@ function diagnosticsStatusLabel() {
 async function refreshDiagnostics() {
   const jobs = [...state.voiceCalls.entries()].map(([peerId, call]) => collectVoiceStats(peerId, call));
   await Promise.allSettled(jobs);
+  const usingSfu = voiceSfu.usesSfuPath();
+  const remoteVoiceCount = state.members.filter((member) => member.inVoice && member.clientId && member.clientId !== state.clientId && !member.offlineSnapshot).length;
   const summary = [
     ["Versão", `v${state.appInfo?.version || "4.4.0"}`],
     ["Servidor", diagnosticsStatusLabel()],
     ["Call", state.inVoice ? "Conectado" : "Fora da call"],
     ["Microfone", state.serverMuted ? "Mutado pelo servidor" : state.muted || state.deafened ? "Mutado" : state.inVoice ? "Ligado" : "Inativo"],
-    ["Peers de voz", String(state.voiceCalls.size)],
+    ["Voz", usingSfu ? `SFU · ${remoteVoiceCount} remoto(s)` : `P2P · ${state.voiceCalls.size} peer(s)`],
     ["Transmissões", String(state.screenStreams.size)],
   ];
   elements.diagnosticsSummary.replaceChildren();
   summary.forEach(([label, value]) => { const card = document.createElement("div"); card.className = "diagnostic-card"; const small = document.createElement("small"); small.textContent = label; const strong = document.createElement("strong"); strong.textContent = value; card.append(small, strong); elements.diagnosticsSummary.append(card); });
   elements.diagnosticsPeers.replaceChildren();
+  if (usingSfu && state.voiceTransportStats) {
+    const stat = state.voiceTransportStats;
+    const loss = Number(stat.lossPercent || 0);
+    const jitter = Number.isFinite(stat.jitterMs) ? stat.jitterMs : null;
+    const rtt = Number.isFinite(stat.rttMs) ? stat.rttMs : null;
+    const quality = loss >= 5 || (jitter != null && jitter >= 50) || (rtt != null && rtt >= 250) ? "ruim" : loss >= 2 || (jitter != null && jitter >= 30) || (rtt != null && rtt >= 140) ? "média" : "boa";
+    const row = document.createElement("div"); row.className = "diagnostic-peer-row"; row.dataset.quality = quality;
+    const copy = document.createElement("div"); const name = document.createElement("strong"); name.textContent = "Cloudflare Realtime SFU"; const qualityNode = document.createElement("small"); qualityNode.textContent = `Conexão ${quality} · ${remoteVoiceCount} remoto(s)`; copy.append(name, qualityNode);
+    const metrics = document.createElement("div"); metrics.className = "diagnostic-peer-metrics";
+    [["Ping", rtt == null ? "—" : `${rtt} ms`], ["Perda", `${loss.toFixed(1)}%`], ["Jitter", jitter == null ? "—" : `${jitter} ms`], ["Rota", "SFU"]].forEach(([label, value]) => { const item = document.createElement("span"); item.innerHTML = `<small>${label}</small><strong>${value}</strong>`; metrics.append(item); });
+    row.append(copy, metrics); elements.diagnosticsPeers.append(row);
+    return;
+  }
   const stats = [...state.voiceStats.values()].sort((a, b) => (a.rttMs ?? 9999) - (b.rttMs ?? 9999));
   if (!stats.length) { const empty = document.createElement("div"); empty.className = "diagnostics-empty"; empty.textContent = state.inVoice ? "Ainda coletando dados da call…" : "Entre na call para medir ping, perda e jitter."; elements.diagnosticsPeers.append(empty); return; }
   stats.forEach((stat) => {
@@ -3323,8 +3338,12 @@ function diagnosticsText() {
   const lines = [
     `Resenhazinha v${state.appInfo?.version || "4.4.0"}`,
     `Servidor: ${diagnosticsStatusLabel()}`,
-    `Call: ${state.inVoice ? "sim" : "não"} | voz peers: ${state.voiceCalls.size} | streams: ${state.screenStreams.size}`,
+    `Call: ${state.inVoice ? "sim" : "não"} | transporte: ${voiceSfu.usesSfuPath() ? "SFU" : "P2P"} | voz remota: ${state.members.filter((member) => member.inVoice && member.clientId && member.clientId !== state.clientId && !member.offlineSnapshot).length} | streams: ${state.screenStreams.size}`,
   ];
+  if (voiceSfu.usesSfuPath() && state.voiceTransportStats) {
+    const stat = state.voiceTransportStats;
+    lines.push(`Cloudflare SFU: ping ${stat.rttMs ?? "—"}ms, perda ${Number(stat.lossPercent || 0).toFixed(1)}%, jitter ${stat.jitterMs ?? "—"}ms`);
+  }
   [...state.voiceStats.values()].forEach((stat) => { const member = state.members.find((item) => item.peerId === stat.peerId); lines.push(`${member?.name || stat.peerId}: ping ${stat.rttMs ?? "—"}ms, perda ${stat.lossPercent}%, jitter ${stat.jitterMs ?? "—"}ms, voz ${stat.targetBitrateKbps}kb/s (${stat.quality})`); });
   return lines.join("\n");
 }
