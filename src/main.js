@@ -7906,7 +7906,7 @@ function paintAvatar(container, name, avatar) {
   image.draggable = false;
   image.__resenhazinhaSource = safeAvatar;
   image.addEventListener("error", () => {
-    if (image.dataset.resenhazinhaSource !== safeAvatar) return;
+    if (image.__resenhazinhaSource !== safeAvatar) return;
     container.classList.remove("has-image");
     container.textContent = initialFor(name);
   }, { once: true });
