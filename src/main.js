@@ -362,7 +362,7 @@ const elements = {
   randomCodeButton: $("#random-code-button"), createButton: $("#create-room-button"), joinButton: $("#join-room-button"),
   lobbyStatus: $("#lobby-status"), lobbyAvatar: $("#lobby-avatar"), lobbyAvatarButton: $("#lobby-avatar-button"),
   chooseAvatarButton: $("#choose-avatar-button"), removeAvatarButton: $("#remove-avatar-button"),
-  mobileServerButton: $("#mobile-server-button"), mobileMembersButton: $("#mobile-members-button"), mobileDrawerScrim: $("#mobile-drawer-scrim"), mobileTopbarKind: $("#mobile-topbar-kind"), mobileTopbarChannel: $("#mobile-topbar-channel"),
+   mobileServerButton: $("#mobile-server-button"), mobileMembersButton: $("#mobile-members-button"), mobileDrawerScrim: $("#mobile-drawer-scrim"), mobileCallChatDrawer: $("#mobile-call-chat-drawer"), mobileCallChatClose: $("#mobile-call-chat-close"), mobileCallChatVoiceList: $("#mobile-call-chat-voice-list"), mobileCallChatCallStatus: $("#mobile-call-chat-call-status"), mobileCallChatOpenCall: $("#mobile-call-chat-open-call"), mobileCallChatPreview: $("#mobile-call-chat-preview"), mobileCallChatOpenChat: $("#mobile-call-chat-open-chat"), mobileTopbarKind: $("#mobile-topbar-kind"), mobileTopbarChannel: $("#mobile-topbar-channel"),
   serverNameDisplay: $("#server-name-display"), serverIconDisplay: $("#server-icon-display"),
   textChannelButton: $("#text-channel-button"), voiceChannelButton: $("#voice-channel-button"), textChannelName: $("#text-channel-name"), voiceChannelName: $("#voice-channel-name"),
   textChannelEmpty: $("#text-channel-empty"), voiceChannelEmpty: $("#voice-channel-empty"), createTextChannelButton: $("#create-text-channel-button"), createVoiceChannelButton: $("#create-voice-channel-button"),
@@ -443,19 +443,79 @@ elements.removeAvatarButton.addEventListener("click", removeAvatar);
 elements.selfAvatarButton.addEventListener("click", (event) => openMemberProfile(state.peer?.id, event.currentTarget));
 elements.joinForm.addEventListener("submit", (event) => { event.preventDefault(); enterRoom("join"); });
 function closeMobileDrawers() {
-  elements.roomView.classList.remove("mobile-server-open", "mobile-members-open");
+  elements.roomView.classList.remove("mobile-server-open", "mobile-members-open", "mobile-call-chat-open");
   if (elements.mobileDrawerScrim) elements.mobileDrawerScrim.hidden = true;
+  if (elements.mobileCallChatDrawer) elements.mobileCallChatDrawer.hidden = true;
 }
 function openMobileDrawer(kind) {
-  const isServer = kind === "server";
-  elements.roomView.classList.toggle("mobile-server-open", isServer);
-  elements.roomView.classList.toggle("mobile-members-open", !isServer);
+  if (kind === "call-chat") {
+    elements.roomView.classList.remove("mobile-server-open", "mobile-members-open");
+    elements.roomView.classList.add("mobile-call-chat-open");
+    if (elements.mobileCallChatDrawer) elements.mobileCallChatDrawer.hidden = false;
+    renderMobileCallChatDrawer();
+  } else {
+    const isServer = kind === "server";
+    elements.roomView.classList.toggle("mobile-server-open", isServer);
+    elements.roomView.classList.toggle("mobile-members-open", !isServer);
+    elements.roomView.classList.remove("mobile-call-chat-open");
+    if (elements.mobileCallChatDrawer) elements.mobileCallChatDrawer.hidden = true;
+  }
   if (elements.mobileDrawerScrim) elements.mobileDrawerScrim.hidden = false;
 }
-
+function renderMobileCallChatDrawer() {
+  if (!isMobileRuntime()) return;
+  const activeMembers = state.members.filter((member) => member.inVoice && !member.offlineSnapshot);
+  if (elements.mobileCallChatCallStatus) elements.mobileCallChatCallStatus.textContent = state.inVoice ? activeMembers.length + (activeMembers.length === 1 ? " pessoa na call" : " pessoas na call") : "Fora da call";
+  if (elements.mobileCallChatVoiceList) {
+    elements.mobileCallChatVoiceList.replaceChildren();
+    if (!activeMembers.length) {
+      const empty = document.createElement("span");
+      empty.className = "mobile-call-chat-empty";
+      empty.textContent = "Ninguém está na call.";
+      elements.mobileCallChatVoiceList.append(empty);
+    } else {
+      activeMembers.forEach((member) => {
+        const row = document.createElement("div");
+        row.className = "mobile-call-chat-voice";
+        const avatar = document.createElement("span");
+        avatar.className = "mobile-call-chat-voice__avatar";
+        avatar.textContent = String(member.name || "?").trim().charAt(0).toUpperCase();
+        const name = document.createElement("strong");
+        name.textContent = member.peerId === state.peer?.id ? String(member.name || "Você") + " (você)" : String(member.name || "Membro");
+        row.append(avatar, name);
+        elements.mobileCallChatVoiceList.append(row);
+      });
+    }
+  }
+  if (elements.mobileCallChatOpenCall) elements.mobileCallChatOpenCall.textContent = state.inVoice ? "Voltar para a call" : "Entrar na call";
+  if (elements.mobileCallChatPreview) {
+    elements.mobileCallChatPreview.replaceChildren();
+    const recent = state.chatMessages.slice(-3);
+    if (!recent.length) {
+      const empty = document.createElement("span");
+      empty.className = "mobile-call-chat-empty";
+      empty.textContent = "Nenhuma mensagem ainda.";
+      elements.mobileCallChatPreview.append(empty);
+    } else {
+      recent.forEach((message) => {
+        const row = document.createElement("div");
+        row.className = "mobile-call-chat-message";
+        const author = document.createElement("strong");
+        author.textContent = String(message.name || message.authorName || "Membro");
+        const text = document.createElement("span");
+        text.textContent = String(message.text || "📎 Anexo");
+        row.append(author, text);
+        elements.mobileCallChatPreview.append(row);
+      });
+    }
+  }
+}
 let mobileSwipeStart = null;
 
 elements.mobileServerButton?.addEventListener("click", () => openMobileDrawer("server"));
+elements.mobileCallChatClose?.addEventListener("click", closeMobileDrawers);
+elements.mobileCallChatOpenCall?.addEventListener("click", () => { closeMobileDrawers(); if (state.inVoice) switchView("voice"); else void joinVoiceChannel(); });
+elements.mobileCallChatOpenChat?.addEventListener("click", () => { closeMobileDrawers(); switchView("text", { focusInput: false }); });
 elements.mobileMembersButton?.addEventListener("click", () => openMobileDrawer("members"));
 elements.mobileDrawerScrim?.addEventListener("click", closeMobileDrawers);
 elements.roomView?.addEventListener("touchstart", (event) => {
@@ -476,7 +536,7 @@ elements.roomView?.addEventListener("touchend", (event) => {
   const deltaX = touch.clientX - mobileSwipeStart.x;
   const deltaY = touch.clientY - mobileSwipeStart.y;
   const horizontal = Math.abs(deltaX) > Math.abs(deltaY) * 1.25;
-  if (horizontal && deltaX >= 72 && mobileSwipeStart.edge) openMobileDrawer("server");
+  if (horizontal && deltaX >= 72 && mobileSwipeStart.edge) openMobileDrawer("call-chat");
   else if (horizontal && deltaX <= -72) closeMobileDrawers();
   mobileSwipeStart = null;
 }, { passive: true });
