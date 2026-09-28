@@ -9,6 +9,7 @@ const manifestPath = path.join(androidRoot, "app/src/main/AndroidManifest.xml");
 let manifest = await readFile(manifestPath, "utf8");
 
 const permissions = [
+  "android.permission.INTERNET",
   "android.permission.RECORD_AUDIO",
   "android.permission.MODIFY_AUDIO_SETTINGS",
   "android.permission.CAMERA",
@@ -91,13 +92,13 @@ if (!packageMatch) {
 
 const packageName = packageMatch[1];
 
-const nativeCode = `package ${packageName};
+package ${packageName};
 
+import android.app.AlertDialog;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Build;
-import android.os.Environment;
 import android.provider.Settings;
 import android.webkit.JavascriptInterface;
 import android.widget.Toast;
@@ -113,18 +114,31 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 
 public class MainActivity extends BridgeActivity {
+    private AndroidUpdater androidUpdater;
+
     @Override
     public void onCreate(android.os.Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        AndroidUpdater updater = new AndroidUpdater(this);
-        getBridge().getWebView().addJavascriptInterface(updater, "AndroidUpdater");
-        getBridge().getWebView().postDelayed(() -> updater.checkForUpdate(), 2500);
+        androidUpdater = new AndroidUpdater(this);
+        getBridge().getWebView().addJavascriptInterface(androidUpdater, "AndroidUpdater");
+        getBridge().getWebView().postDelayed(() -> androidUpdater.checkForUpdate(), 2200);
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        if (androidUpdater != null) {
+            androidUpdater.resumePendingInstall();
+        }
     }
 
     public static class AndroidUpdater {
         private final Context context;
         private final MainActivity activity;
         private static final String REPO = "Yazzdyz/Resenhazinha-DC-2.0";
+        private volatile String pendingApkUrl;
+        private volatile boolean waitingForInstallPermission;
+        private volatile boolean checkRunning;
 
         AndroidUpdater(MainActivity activity) {
             this.activity = activity;
@@ -133,20 +147,47 @@ public class MainActivity extends BridgeActivity {
 
         @JavascriptInterface
         public void checkForUpdate() {
-            new Thread(this::checkForUpdateInternal).start();
+            if (checkRunning) return;
+            checkRunning = true;
+            new Thread(() -> {
+                try {
+                    checkForUpdateInternal();
+                } finally {
+                    checkRunning = false;
+                }
+            }, "resenhazinha-updater").start();
         }
 
         @JavascriptInterface
         public void installApk(String apkUrl) {
-            new Thread(() -> downloadAndInstall(apkUrl)).start();
+            if (!isAllowedApkUrl(apkUrl)) {
+                toast("Link de atualização inválido.");
+                return;
+            }
+            pendingApkUrl = apkUrl;
+            new Thread(() -> downloadAndInstall(apkUrl), "resenhazinha-downloader").start();
+        }
+
+        @JavascriptInterface
+        public String getCurrentVersion() {
+            return getInstalledVersion();
+        }
+
+        public void resumePendingInstall() {
+            if (!waitingForInstallPermission || !isInstallPermissionGranted() || pendingApkUrl == null) return;
+            waitingForInstallPermission = false;
+            String apkUrl = pendingApkUrl;
+            new Thread(() -> downloadAndInstall(apkUrl), "resenhazinha-resume-installer").start();
         }
 
         private void checkForUpdateInternal() {
+            String currentVersion = getInstalledVersion();
             try {
                 URL url = new URL("https://api.github.com/repos/" + REPO + "/releases?per_page=20");
                 HttpURLConnection connection = (HttpURLConnection) url.openConnection();
                 connection.setRequestProperty("Accept", "application/vnd.github+json");
                 connection.setRequestProperty("User-Agent", "Resenhazinha-Android");
+                connection.setRequestProperty("X-GitHub-Api-Version", "2022-11-28");
                 connection.setInstanceFollowRedirects(true);
                 connection.setConnectTimeout(15000);
                 connection.setReadTimeout(20000);
@@ -154,7 +195,7 @@ public class MainActivity extends BridgeActivity {
 
                 if (connection.getResponseCode() < 200 || connection.getResponseCode() >= 300) {
                     connection.disconnect();
-                    notifyUpdateResult(false, false, getCurrentVersion(), null, null);
+                    notifyUpdateResult(false, false, currentVersion, null, null);
                     return;
                 }
 
@@ -170,25 +211,27 @@ public class MainActivity extends BridgeActivity {
                 }
 
                 org.json.JSONArray releases = new org.json.JSONArray(body.toString());
-                String currentVersion = getCurrentVersion();
                 String latestVersion = currentVersion;
                 String latestApkUrl = null;
 
                 for (int i = 0; i < releases.length(); i++) {
                     org.json.JSONObject release = releases.getJSONObject(i);
                     if (release.optBoolean("draft") || release.optBoolean("prerelease")) continue;
+
                     String tag = release.optString("tag_name", "");
                     if (!tag.matches("(?i)mobile-v\\d+\\.\\d+\\.\\d+")) continue;
+
                     String version = tag.replaceFirst("(?i)^mobile-v", "");
                     if (compareVersions(version, latestVersion) <= 0) continue;
 
                     org.json.JSONArray assets = release.optJSONArray("assets");
                     if (assets == null) continue;
+
                     for (int j = 0; j < assets.length(); j++) {
                         org.json.JSONObject asset = assets.getJSONObject(j);
                         String name = asset.optString("name", "");
                         String downloadUrl = asset.optString("browser_download_url", "");
-                        if (name.toLowerCase(java.util.Locale.ROOT).endsWith(".apk") && !downloadUrl.isEmpty()) {
+                        if (name.toLowerCase(java.util.Locale.ROOT).endsWith(".apk") && isAllowedApkUrl(downloadUrl)) {
                             latestVersion = version;
                             latestApkUrl = downloadUrl;
                             break;
@@ -198,17 +241,19 @@ public class MainActivity extends BridgeActivity {
 
                 boolean available = latestApkUrl != null;
                 notifyUpdateResult(true, available, currentVersion, latestVersion, latestApkUrl);
+
                 if (available) {
                     showUpdateDialogNative(latestVersion, latestApkUrl);
                 }
             } catch (Exception ignored) {
-                notifyUpdateResult(false, false, getCurrentVersion(), null, null);
+                notifyUpdateResult(false, false, currentVersion, null, null);
             }
         }
 
-        private String getCurrentVersion() {
+        private String getInstalledVersion() {
             try {
-                android.content.pm.PackageInfo info = context.getPackageManager().getPackageInfo(context.getPackageName(), 0);
+                android.content.pm.PackageInfo info =
+                    context.getPackageManager().getPackageInfo(context.getPackageName(), 0);
                 return info.versionName == null ? "0.0.0" : info.versionName;
             } catch (Exception ignored) {
                 return "0.0.0";
@@ -227,64 +272,146 @@ public class MainActivity extends BridgeActivity {
         }
 
         private int parsePart(String value) {
-            try { return Integer.parseInt(value.replaceAll("[^0-9].*", "")); }
-            catch (Exception ignored) { return 0; }
+            try {
+                return Integer.parseInt(value.replaceAll("[^0-9].*", ""));
+            } catch (Exception ignored) {
+                return 0;
+            }
         }
 
-        private void notifyUpdateResult(boolean ok, boolean updateAvailable, String currentVersion, String latestVersion, String apkUrl) {
+        private void notifyUpdateResult(
+            boolean ok,
+            boolean updateAvailable,
+            String currentVersion,
+            String latestVersion,
+            String apkUrl
+        ) {
             String current = org.json.JSONObject.quote(currentVersion == null ? "" : currentVersion);
             String latest = org.json.JSONObject.quote(latestVersion == null ? "" : latestVersion);
-            String script = "window.__resenhazinhaUpdateResult && window.__resenhazinhaUpdateResult({ok:" + ok + ",updateAvailable:" + updateAvailable + ",currentVersion:" + current + ",latestVersion:" + latest + "})";
-            activity.getBridge().getWebView().post(() -> activity.getBridge().getWebView().evaluateJavascript(script, null));
+            String script =
+                "window.__resenhazinhaUpdateResult && window.__resenhazinhaUpdateResult({ok:" +
+                ok +
+                ",updateAvailable:" +
+                updateAvailable +
+                ",currentVersion:" +
+                current +
+                ",latestVersion:" +
+                latest +
+                "})";
+
+            activity.getBridge().getWebView().post(
+                () -> activity.getBridge().getWebView().evaluateJavascript(script, null)
+            );
         }
 
         private void showUpdateDialogNative(String version, String apkUrl) {
-            String v = org.json.JSONObject.quote(version);
-            String u = org.json.JSONObject.quote(apkUrl);
-            String script = "window.__resenhazinhaShowUpdateDialog && window.__resenhazinhaShowUpdateDialog(" + v + "," + u + ")";
-            activity.getBridge().getWebView().post(() -> activity.getBridge().getWebView().evaluateJavascript(script, null));
+            activity.runOnUiThread(() -> {
+                if (activity.isFinishing() || (Build.VERSION.SDK_INT >= 17 && activity.isDestroyed())) {
+                    return;
+                }
+
+                new AlertDialog.Builder(activity)
+                    .setTitle("Nova versão disponível")
+                    .setMessage(
+                        "A versão " + version + " do Resenhazinha está disponível.\n\n" +
+                        "Você está usando a versão " + getInstalledVersion() + "."
+                    )
+                    .setNegativeButton("Agora não", null)
+                    .setPositiveButton("Atualizar", (dialog, which) -> installApk(apkUrl))
+                    .setCancelable(true)
+                    .show();
+            });
+        }
+
+        private boolean isAllowedApkUrl(String apkUrl) {
+            if (apkUrl == null || apkUrl.isEmpty()) return false;
+            try {
+                Uri uri = Uri.parse(apkUrl);
+                String scheme = uri.getScheme();
+                String host = uri.getHost();
+                return "https".equalsIgnoreCase(scheme)
+                    && host != null
+                    && (
+                        host.equalsIgnoreCase("github.com")
+                        || host.endsWith(".githubusercontent.com")
+                    );
+            } catch (Exception ignored) {
+                return false;
+            }
+        }
+
+        private boolean isInstallPermissionGranted() {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return true;
+            return context.getPackageManager().canRequestPackageInstalls();
         }
 
         private void downloadAndInstall(String apkUrl) {
+            if (!isAllowedApkUrl(apkUrl)) {
+                toast("Link de atualização inválido.");
+                return;
+            }
+
             try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
-                    !context.getPackageManager().canRequestPackageInstalls()) {
+                if (!isInstallPermissionGranted()) {
+                    waitingForInstallPermission = true;
+                    pendingApkUrl = apkUrl;
+
                     Intent settings = new Intent(
                         Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
                         Uri.parse("package:" + context.getPackageName())
                     );
                     settings.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                     context.startActivity(settings);
-                    toast("Permita a instalação para continuar a atualização.");
+                    toast("Permita a instalação e volte ao Resenhazinha.");
                     return;
                 }
+
+                waitingForInstallPermission = false;
 
                 File updateDir = new File(context.getCacheDir(), "updates");
                 if (!updateDir.exists() && !updateDir.mkdirs()) {
                     throw new IllegalStateException("Não foi possível criar a pasta de atualização.");
                 }
 
+                File tempFile = new File(updateDir, "resenhazinha-update.apk.part");
                 File apkFile = new File(updateDir, "resenhazinha-update.apk");
+
                 URL url = new URL(apkUrl);
                 HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+                connection.setRequestProperty("User-Agent", "Resenhazinha-Android");
                 connection.setInstanceFollowRedirects(true);
                 connection.setConnectTimeout(15000);
-                connection.setReadTimeout(30000);
+                connection.setReadTimeout(60000);
                 connection.connect();
 
-                if (connection.getResponseCode() < 200 || connection.getResponseCode() >= 300) {
-                    throw new IllegalStateException("Falha HTTP " + connection.getResponseCode());
+                int responseCode = connection.getResponseCode();
+                if (responseCode < 200 || responseCode >= 300) {
+                    throw new IllegalStateException("Falha HTTP " + responseCode);
                 }
 
-                try (InputStream input = connection.getInputStream();
-                     FileOutputStream output = new FileOutputStream(apkFile)) {
-                    byte[] buffer = new byte[8192];
+                try (
+                    InputStream input = connection.getInputStream();
+                    FileOutputStream output = new FileOutputStream(tempFile)
+                ) {
+                    byte[] buffer = new byte[16384];
                     int count;
                     while ((count = input.read(buffer)) != -1) {
                         output.write(buffer, 0, count);
                     }
                 } finally {
                     connection.disconnect();
+                }
+
+                if (!tempFile.exists() || tempFile.length() < 1024) {
+                    throw new IllegalStateException("APK baixado está vazio ou incompleto.");
+                }
+
+                if (apkFile.exists() && !apkFile.delete()) {
+                    throw new IllegalStateException("Não foi possível substituir o APK anterior.");
+                }
+
+                if (!tempFile.renameTo(apkFile)) {
+                    throw new IllegalStateException("Não foi possível finalizar o download.");
                 }
 
                 Uri apkUri = FileProvider.getUriForFile(
@@ -309,7 +436,7 @@ public class MainActivity extends BridgeActivity {
         }
     }
 }
-`;
+
 
 await writeFile(mainActivityPath, nativeCode);
 const appGradlePath = path.join(androidRoot, "app/build.gradle");
