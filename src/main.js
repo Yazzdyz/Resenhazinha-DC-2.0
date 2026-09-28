@@ -5125,20 +5125,48 @@ function broadcastRoomData(message) {
   state.guestConnections.forEach((connection) => { if (connection.open) connection.send(message); });
 }
 
+function isChatNearBottom(container = elements.chatMessages, threshold = 90) {
+  if (!container) return true;
+  return container.scrollHeight - container.scrollTop - container.clientHeight <= threshold;
+}
+
+function restoreChatScroll(container, scrollTop, scrollHeight, wasNearBottom = false) {
+  if (!container) return;
+  const apply = () => {
+    if (wasNearBottom) {
+      container.scrollTop = container.scrollHeight;
+      return;
+    }
+    const heightDelta = Math.max(0, container.scrollHeight - scrollHeight);
+    container.scrollTop = Math.max(0, scrollTop + heightDelta);
+  };
+  apply();
+  window.requestAnimationFrame(apply);
+}
+
 function appendChatMessage(message) {
   if (state.chatMessages.some((item) => item.id === message.id)) return;
+  const wasNearBottom = isChatNearBottom();
+  const previousScrollTop = elements.chatMessages?.scrollTop || 0;
+  const previousScrollHeight = elements.chatMessages?.scrollHeight || 0;
   const previousMessage = state.chatMessages.at(-1) || null;
+
   state.chatMessages.push(message);
   while (state.chatMessages.length > MAX_CHAT_HISTORY) {
     const removed = state.chatMessages.shift();
     if (state.isHost && !state.cloudMode) void deleteMessageAttachments(removed); else releaseMessageAttachmentCache(removed);
   }
+
   const incoming = message.clientId ? message.clientId !== state.clientId : message.peerId !== state.peer?.id;
   const mentioned = incoming && messageMentionsCurrentUser(message);
   const doNotDisturb = normalizePresence(state.presenceStatus) === "dnd";
   const notActivelyReading = state.currentView !== "text" || document.hidden || !document.hasFocus();
+
   if (incoming && !doNotDisturb) playUiSound("message", mentioned ? 0.58 : 0.42);
+
   renderChatMessage(message, previousMessage);
+  restoreChatScroll(elements.chatMessages, previousScrollTop, previousScrollHeight, wasNearBottom);
+
   if (mentioned && !doNotDisturb) toast(`${message.name} mencionou você.`);
   if (incoming && notActivelyReading) {
     state.unreadMessages = Math.min(99, state.unreadMessages + 1);
@@ -5163,9 +5191,30 @@ function shouldGroupChatMessage(previousMessage, message) {
 }
 
 function renderChatHistory() {
-  elements.chatMessages.querySelectorAll(".chat-message").forEach((item) => item.remove());
+  const container = elements.chatMessages;
+  if (!container) return;
+
+  const hadRenderedMessages = container.querySelector(".chat-message") !== null;
+  const previousScrollTop = container.scrollTop;
+  const previousScrollHeight = container.scrollHeight;
+  const wasNearBottom = isChatNearBottom(container);
+
+  container.querySelectorAll(".chat-message").forEach((item) => item.remove());
+  container.scrollTop = previousScrollTop;
+
+  container.querySelectorAll(".chat-message").forEach((item) => item.remove());
   elements.chatEmpty.hidden = state.chatMessages.length > 0;
-  state.chatMessages.forEach((message, index) => renderChatMessage(message, index > 0 ? state.chatMessages[index - 1] : null));
+
+  state.chatMessages.forEach((message, index) => {
+    renderChatMessage(message, index > 0 ? state.chatMessages[index - 1] : null);
+  });
+
+  if (!hadRenderedMessages) {
+    container.scrollTop = container.scrollHeight;
+    return;
+  }
+
+  restoreChatScroll(container, previousScrollTop, previousScrollHeight, wasNearBottom);
 }
 
 function renderChatMessage(message, previousMessage = null) {
@@ -5226,7 +5275,6 @@ function renderChatMessage(message, previousMessage = null) {
   renderChatAttachments(content, message);
   renderMessageReactions(content, message);
   item.append(avatar, content); elements.chatMessages.append(item);
-  elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight;
 }
 
 function createChatMessageActions(message, isSelfMessage = false) {
