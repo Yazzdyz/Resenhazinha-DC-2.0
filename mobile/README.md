@@ -19,7 +19,7 @@ npx cap open android
 
 O projeto Android é gerado pelo Capacitor e não precisa ser mantido manualmente no repositório nesta primeira etapa.
 
-O workflow `Android mobile` gera um APK debug automaticamente para validação.
+O workflow `Android mobile` gera um APK debug automaticamente para validação e usa o SDK Android 36.
 
 ## Escopo inicial
 
