@@ -11,7 +11,7 @@ on:
       - "public/**"
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: android-mobile-${{ github.ref }}
@@ -75,3 +75,81 @@ jobs:
           name: Resenhazinha-Android-debug
           path: mobile/android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+
+  build-release-apk:
+    name: Build Android release APK
+    if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' && env.ANDROID_KEYSTORE_PASSWORD != '' && env.ANDROID_KEY_ALIAS != '' && env.ANDROID_KEY_PASSWORD != '' }}
+    runs-on: ubuntu-latest
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      ANDROID_KEYSTORE_FILE: ${{ github.workspace }}/mobile/android/release.keystore
+
+    steps:
+      - name: Baixar código
+        uses: actions/checkout@v4
+
+      - name: Preparar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Preparar Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Preparar Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: "platform-tools platforms;android-36 build-tools;36.0.0"
+          accept-android-sdk-licenses: true
+
+      - name: Instalar dependências web
+        run: npm ci
+
+      - name: Gerar aplicação web
+        run: npm run build
+
+      - name: Instalar Capacitor
+        working-directory: mobile
+        run: npm install --no-audit --no-fund
+
+      - name: Gerar projeto Android
+        working-directory: mobile
+        run: npx cap add android
+
+      - name: Preparar chave de assinatura
+        working-directory: mobile
+        run: |
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/release.keystore
+          chmod 600 android/release.keystore
+
+      - name: Ajustar projeto Android
+        working-directory: mobile
+        run: node scripts/patch-android.mjs
+
+      - name: Sincronizar Capacitor
+        working-directory: mobile
+        run: npx cap sync android
+
+      - name: Gerar APK assinado
+        working-directory: mobile/android
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Publicar release Android
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./mobile/package.json').version")
+          TAG="mobile-v$VERSION"
+          APK="mobile/android/app/build/outputs/apk/release/app-release.apk"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$APK" --clobber
+          else
+            gh release create "$TAG" "$APK" --title "Resenhazinha Android $VERSION" --notes "Versão Android do Resenhazinha. Atualização pelo próprio aplicativo." --latest=false
+          fi
