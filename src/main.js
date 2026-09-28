@@ -5058,7 +5058,7 @@ function updateWindowTitle() {
 async function showDesktopMessageNotification(message, mentioned = false) {
   if (!window.resenhazinhaDesktop?.showNotification) return;
   const body = normalizeChatText(message.text) || (sanitizeChatAttachments(message.attachments).length ? "Enviou um anexo" : "Nova mensagem");
-  await window.resenhazinhaDesktop.showNotification({ title: mentioned ? `${message.name} mencionou você` : message.name, body, messageId: message.id, silent: true }).catch(() => undefined);
+  await showDesktopMessageNotification(message, mentioned);
 }
 
 
@@ -5914,22 +5914,6 @@ async function deleteStoredChatAttachment(id) {
 }
 
 
-  const cleanId = sanitizeTransferId(id); const data = toUint8Array(bytes);
-  if (!cleanId || !data || data.byteLength > MAX_CHAT_ATTACHMENT_BYTES || !window.resenhazinhaDesktop?.saveChatAttachment) return false;
-  const result = await window.resenhazinhaDesktop.saveChatAttachment({ id: cleanId, bytes: data });
-  return Boolean(result?.saved);
-}
-
-async function readStoredChatAttachment(id) {
-  const cleanId = sanitizeTransferId(id); if (!cleanId || !window.resenhazinhaDesktop?.readChatAttachment) return null;
-  const result = await window.resenhazinhaDesktop.readChatAttachment(cleanId); if (!result?.found) return null;
-  const bytes = toUint8Array(result.bytes); return bytes && bytes.byteLength <= MAX_CHAT_ATTACHMENT_BYTES ? new Uint8Array(bytes) : null;
-}
-
-async function deleteStoredChatAttachment(id) {
-  const cleanId = sanitizeTransferId(id); if (!cleanId || !window.resenhazinhaDesktop?.deleteChatAttachment) return;
-  await window.resenhazinhaDesktop.deleteChatAttachment(cleanId).catch(() => undefined);
-}
 
 function cacheAttachmentBlob(meta, value) {
   const cleanMeta = sanitizeChatAttachmentMeta(meta); if (!cleanMeta) return null;
