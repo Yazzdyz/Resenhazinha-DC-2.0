@@ -2828,7 +2828,9 @@ function connectToHost(isReconnect = false) {
     }
 
     startConnectionHeartbeat();
-    window.setTimeout(sendOwnProfileMediaToHost, isMobileRuntime() ? 1000 : 120);
+    if (!isMobileRuntime()) {
+      window.setTimeout(sendOwnProfileMediaToHost, 120);
+    }
 
     if (!state.serverBinding) {
       saveServerBinding({
