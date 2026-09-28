@@ -505,7 +505,7 @@ elements.themeChoiceButtons.forEach((button) => button.addEventListener("click",
   state.appTheme = normalizeTheme(button.dataset.themeChoice);
   applyUiTheme();
   renderThemeChoices();
-  void persistProfileTextState();
+  if (isMobileRuntime()) void persistProfileTextState();
 }));
 elements.presenceChoiceButtons.forEach((button) => button.addEventListener("click", () => { void setPresenceStatus(button.dataset.presenceChoice); }));
 elements.userChooseAvatarButton.addEventListener("click", async () => { await chooseAvatar(); renderUserSettings(); });
@@ -6142,18 +6142,21 @@ async function restartMicrophoneStream() {
 }
 
 async function joinVoiceChannel() {
-  if (!state.server.voiceChannel.exists || state.inVoice || state.voiceTransition) {
+  const useMobileVoiceGuard = isMobileRuntime();
+  if (!state.server.voiceChannel.exists || state.inVoice || (useMobileVoiceGuard && state.voiceTransition)) {
     if (state.server.voiceChannel.exists && state.inVoice) switchView("voice");
     return;
   }
 
-  state.voiceTransition = "joining";
-  updateControlState();
+  if (useMobileVoiceGuard) {
+    state.voiceTransition = "joining";
+    updateControlState();
+  }
 
   try {
     await ensureMicrophoneStream();
 
-    if (state.voiceTransition !== "joining") return;
+    if (useMobileVoiceGuard && state.voiceTransition !== "joining") return;
 
     callSessions.beginSession("voice");
     state.voicePresenceRevision = normalizeVoicePresenceRevision(state.voicePresenceRevision) + 1;
@@ -6179,13 +6182,13 @@ async function joinVoiceChannel() {
 
     reconcileVoiceCalls();
   } catch (_error) {
-    if (state.voiceTransition === "joining") {
+    if (useMobileVoiceGuard && state.voiceTransition === "joining") {
       state.voiceTransition = null;
       updateControlState();
     }
     toast("Não consegui acessar o microfone. Libere a permissão para entrar na call.", "error");
   } finally {
-    if (state.voiceTransition === "joining") {
+    if (useMobileVoiceGuard && state.voiceTransition === "joining") {
       state.voiceTransition = null;
       updateControlState();
     }
@@ -6193,14 +6196,17 @@ async function joinVoiceChannel() {
 }
 
 function leaveVoiceChannel(options = {}) {
-  if (!state.inVoice || state.voiceTransition) {
+  const useMobileVoiceGuard = isMobileRuntime();
+  if (!state.inVoice || (useMobileVoiceGuard && state.voiceTransition)) {
     if (!state.inVoice && !state.voiceTransition) switchView(state.server.textChannel.exists ? "text" : "voice");
     return;
   }
 
   const forced = Boolean(options?.forced);
-  state.voiceTransition = "leaving";
-  updateControlState();
+  if (useMobileVoiceGuard) {
+    state.voiceTransition = "leaving";
+    updateControlState();
+  }
 
   playUiSound("voiceLeave", 0.55);
 
@@ -6234,8 +6240,10 @@ function leaveVoiceChannel(options = {}) {
   if (state.server.textChannel.exists) switchView("text");
   toast(options?.message || "Você saiu da call e continuou no servidor pelo chat.");
 
-  state.voiceTransition = null;
-  updateControlState();
+  if (useMobileVoiceGuard) {
+    state.voiceTransition = null;
+    updateControlState();
+  }
 }
 
 function resizeChatInput() {
@@ -7353,10 +7361,11 @@ function updateControlState() {
   elements.shareButton.dataset.tooltip = state.screenStream ? "Parar compartilhamento" : "Compartilhar tela";
   elements.voiceJoinButton.hidden = state.inVoice || !state.server.voiceChannel.exists;
   elements.voiceLeaveButton.hidden = !state.inVoice || !state.server.voiceChannel.exists;
-  elements.voiceJoinButton.disabled = state.voiceTransition === "joining" || state.voiceTransition === "leaving";
-  elements.voiceLeaveButton.disabled = !state.inVoice || state.voiceTransition === "joining" || state.voiceTransition === "leaving";
+  const mobileVoiceTransition = isMobileRuntime() && Boolean(state.voiceTransition);
+  elements.voiceJoinButton.disabled = mobileVoiceTransition;
+  elements.voiceLeaveButton.disabled = !state.inVoice || mobileVoiceTransition;
   elements.leaveButton.hidden = !state.inVoice || !state.server.voiceChannel.exists;
-  elements.leaveButton.disabled = !state.inVoice || Boolean(state.voiceTransition); elements.leaveButton.setAttribute("aria-label", "Sair da call e continuar no chat"); elements.leaveButton.title = "Sair da call e continuar no servidor";
+  elements.leaveButton.disabled = !state.inVoice || mobileVoiceTransition; elements.leaveButton.setAttribute("aria-label", "Sair da call e continuar no chat"); elements.leaveButton.title = "Sair da call e continuar no servidor";
   const selfPresence = presenceLabel(state.presenceStatus);
   elements.selfState.textContent = !state.inVoice ? `${selfPresence} · fora da call` : state.deafened ? `${selfPresence} · áudio e microfone desativados` : state.serverMuted ? `${selfPresence} · mutado pelo servidor` : state.muted ? `${selfPresence} · microfone desligado` : `${selfPresence} · microfone ligado`;
   elements.selfState.dataset.presence = normalizePresence(state.presenceStatus);
