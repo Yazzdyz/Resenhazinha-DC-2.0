@@ -1094,14 +1094,14 @@ function applyBannerSurface(element, banner, accent = "#6f6b9b") {
           if (element.__resenhazinhaBannerSource !== safeBanner) return;
           const objectUrl = URL.createObjectURL(blob);
           revokeMobileObjectUrl(element, "__resenhazinhaBannerObjectUrl");
-          if (element.dataset.resenhazinhaBannerSource !== safeBanner) {
+          if (element.__resenhazinhaBannerSource !== safeBanner) {
             URL.revokeObjectURL(objectUrl);
             return;
           }
           element.__resenhazinhaBannerObjectUrl = objectUrl;
           element.style.backgroundImage = `${gradient}, url(${objectUrl})`;
         } catch (_error) {
-          if (element.dataset.resenhazinhaBannerSource === safeBanner) {
+          if (element.__resenhazinhaBannerSource === safeBanner) {
             element.style.backgroundImage = `${gradient}, url(${safeBanner})`;
           }
         }
@@ -2173,7 +2173,7 @@ async function normalizeMobileSelectedProfileImage(dataUrl, kind) {
   if (!/^data:image\/(?:png|jpe?g|webp|gif);base64,/i.test(value)) return null;
 
   const mime = value.slice(5, value.indexOf(";")).toLowerCase();
-  const maxChars = kind === "avatar" ? 5_300_000 : 9_100_000;
+  const maxChars = kind === "avatar" ? 5_500_000 : 9_400_000;
   if (value.length <= maxChars || mime === "image/gif") return value;
 
   return new Promise((resolve) => {
@@ -2181,8 +2181,8 @@ async function normalizeMobileSelectedProfileImage(dataUrl, kind) {
     image.decoding = "async";
     image.onload = () => {
       try {
-        const maxWidth = kind === "avatar" ? 512 : 1600;
-        const maxHeight = kind === "avatar" ? 512 : 900;
+        const maxWidth = kind === "avatar" ? 768 : 1920;
+        const maxHeight = kind === "avatar" ? 768 : 1080;
         let width = Number(image.naturalWidth) || maxWidth;
         let height = Number(image.naturalHeight) || maxHeight;
         const scale = Math.min(1, maxWidth / width, maxHeight / height);
@@ -2198,15 +2198,15 @@ async function normalizeMobileSelectedProfileImage(dataUrl, kind) {
           context.clearRect(0, 0, width, height);
           context.drawImage(image, 0, 0, width, height);
 
-          const quality = Math.max(0.56, 0.90 - attempt * 0.05);
+          const quality = Math.max(0.72, 0.95 - attempt * 0.035);
           const output = canvas.toDataURL("image/webp", quality);
           if (output.length <= maxChars) {
             resolve(output);
             return;
           }
 
-          width = Math.max(kind === "avatar" ? 256 : 720, Math.round(width * 0.82));
-          height = Math.max(kind === "avatar" ? 256 : 420, Math.round(height * 0.82));
+          width = Math.max(kind === "avatar" ? 320 : 960, Math.round(width * 0.90));
+          height = Math.max(kind === "avatar" ? 320 : 540, Math.round(height * 0.90));
         }
       } catch (_error) {}
       resolve(null);
@@ -7884,7 +7884,7 @@ async function hydrateMobileDataImage(image, dataUrl, container, key) {
     container[key] = objectUrl;
     image.src = objectUrl;
   } catch (_error) {
-    if (image.isConnected && image.dataset.resenhazinhaSource === dataUrl) {
+    if (image.isConnected && image.__resenhazinhaSource === dataUrl) {
       image.src = dataUrl;
     }
   }

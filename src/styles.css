@@ -6556,7 +6556,7 @@ body[data-theme="light"] .member-profile-dialog::backdrop {
 
   .lobby {
     min-height: 100dvh;
-    padding: max(14px, var(--safe-area-inset-top, env(safe-area-inset-top, 0px))) 14px max(14px, var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)));
+    padding: max(14px, 0px) 14px max(14px, 0px);
   }
 
   .lobby-card {
@@ -6611,7 +6611,7 @@ body[data-theme="light"] .member-profile-dialog::backdrop {
     gap: 8px;
     border-bottom: 1px solid #202023;
     background: #0b0b0d;
-    padding: max(5px, var(--safe-area-inset-top, env(safe-area-inset-top, 0px))) 8px 5px;
+    padding: max(5px, 0px) 8px 5px;
   }
 
   .mobile-topbar-button {
@@ -6716,7 +6716,7 @@ body[data-theme="light"] .member-profile-dialog::backdrop {
     border-right: 1px solid #2a2a2e;
     box-shadow: 20px 0 70px rgba(0,0,0,.58);
     transition: transform 180ms ease;
-    padding-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
+    padding-top: 0px;
   }
 
   .members-panel {
@@ -6730,7 +6730,7 @@ body[data-theme="light"] .member-profile-dialog::backdrop {
     border-left: 1px solid #2a2a2e;
     box-shadow: -20px 0 70px rgba(0,0,0,.58);
     transition: transform 180ms ease;
-    padding-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
+    padding-top: 0px;
   }
 
   .room.mobile-server-open .server-sidebar {
@@ -6760,7 +6760,7 @@ body[data-theme="light"] .member-profile-dialog::backdrop {
   }
 
   .chat-messages--full {
-    padding: 12px 9px max(16px, var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)));
+    padding: 12px 9px max(16px, 0px);
   }
 
   .chat-messages--full .chat-message {
@@ -6784,7 +6784,7 @@ body[data-theme="light"] .member-profile-dialog::backdrop {
 
   .chat-form--full {
     min-height: 50px;
-    margin: 0 8px max(8px, var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)));
+    margin: 0 8px max(8px, 0px);
     border-radius: 14px;
   }
 
@@ -6844,7 +6844,7 @@ body[data-theme="light"] .member-profile-dialog::backdrop {
 
   .discord-call-footer {
     min-height: 82px;
-    padding: 8px 8px max(9px, var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)));
+    padding: 8px 8px max(9px, 0px);
   }
 
   .discord-call-footer .call-hint {
@@ -6928,7 +6928,7 @@ body[data-theme="light"] .member-profile-dialog::backdrop {
   .voice-connection-panel {
     left: 8px;
     right: 8px;
-    bottom: calc(8px + var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)));
+    bottom: calc(8px + 0px);
   }
 
   .gif-picker,
@@ -7036,7 +7036,7 @@ body.platform-mobile .screen-quality-label {
     display: grid;
     place-items: center;
     background: rgba(0,0,0,.94);
-    padding: max(18px, var(--safe-area-inset-top, env(safe-area-inset-top, 0px))) 12px max(18px, var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)));
+    padding: max(18px, 0px) 12px max(18px, 0px);
     touch-action: none;
   }
 
@@ -7057,7 +7057,7 @@ body.platform-mobile .screen-quality-label {
   .mobile-image-viewer-close {
     position: absolute;
     z-index: 2;
-    top: max(10px, var(--safe-area-inset-top, env(safe-area-inset-top, 0px)));
+    top: max(10px, 0px);
     right: 12px;
     display: grid;
     width: 42px;
@@ -7089,8 +7089,8 @@ body.platform-mobile .screen-quality-label {
     min-width: 100vw !important;
     max-width: none !important;
     height: 100dvh !important;
-    padding-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px)) !important;
-    padding-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) !important;
+    padding-top: 0px !important;
+    padding-bottom: 0px !important;
     border: 0 !important;
     border-radius: 0 !important;
     background: var(--theme-members) !important;

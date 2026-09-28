@@ -3,7 +3,8 @@
   "appName": "Resenhazinha",
   "webDir": "../dist",
   "android": {
-    "allowMixedContent": false
+    "allowMixedContent": false,
+    "adjustMarginsForEdgeToEdge": "force"
   },
   "appendUserAgent": "ResenhazinhaMobile/1.0",
   "plugins": {
