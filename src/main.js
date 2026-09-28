@@ -6152,12 +6152,12 @@ async function restartMicrophoneStream() {
 }
 
 async function joinVoiceChannel() {
-  state.voiceLeaveLockRevision = 0;
   if (!state.server.voiceChannel.exists || state.inVoice || state.voiceTransition) {
     if (state.server.voiceChannel.exists && state.inVoice) switchView("voice");
     return;
   }
 
+  state.voiceLeaveLockRevision = 0;
   state.voiceTransition = "joining";
   const transitionId = crypto.randomUUID();
   state.voiceTransitionId = transitionId;
