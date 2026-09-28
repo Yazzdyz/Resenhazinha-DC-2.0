@@ -73,6 +73,15 @@ const PEER_OPTIONS = {
   secure: true,
 };
 
+function isMobileRuntime() {
+  return Boolean(
+    window.Capacitor?.isNativePlatform?.()
+    || window.Capacitor?.getPlatform?.() === "android"
+    || window.Capacitor?.getPlatform?.() === "ios"
+    || /Android|iPhone|iPad|Capacitor/i.test(navigator.userAgent)
+  );
+}
+
 const callSessions = new CallSessionManager();
 
 const state = {
@@ -347,7 +356,8 @@ const elements = {
   randomCodeButton: $("#random-code-button"), createButton: $("#create-room-button"), joinButton: $("#join-room-button"),
   lobbyStatus: $("#lobby-status"), lobbyAvatar: $("#lobby-avatar"), lobbyAvatarButton: $("#lobby-avatar-button"),
   chooseAvatarButton: $("#choose-avatar-button"), removeAvatarButton: $("#remove-avatar-button"),
-  serverNameDisplay: $("#server-name-display"), serverIconDisplay: $("#server-icon-display"),
+  mobileServerButton: $("#mobile-server-button"), mobileMembersButton: $("#mobile-members-button"), mobileDrawerScrim: $("#mobile-drawer-scrim"),
+    serverNameDisplay: $("#server-name-display"), serverIconDisplay: $("#server-icon-display"),
   textChannelButton: $("#text-channel-button"), voiceChannelButton: $("#voice-channel-button"), textChannelName: $("#text-channel-name"), voiceChannelName: $("#voice-channel-name"),
   textChannelEmpty: $("#text-channel-empty"), voiceChannelEmpty: $("#voice-channel-empty"), createTextChannelButton: $("#create-text-channel-button"), createVoiceChannelButton: $("#create-voice-channel-button"),
   voiceMiniList: $("#voice-mini-list"), voiceChannelDuration: $("#voice-channel-duration"), voiceConnectionPanel: $("#voice-connection-panel"), voiceConnectionDetail: $("#voice-connection-detail"), voicePingIndicator: $("#voice-ping-indicator"), textView: $("#text-view"), voiceView: $("#voice-view"),
@@ -426,6 +436,20 @@ elements.chooseAvatarButton.addEventListener("click", chooseAvatar);
 elements.removeAvatarButton.addEventListener("click", removeAvatar);
 elements.selfAvatarButton.addEventListener("click", (event) => openMemberProfile(state.peer?.id, event.currentTarget));
 elements.joinForm.addEventListener("submit", (event) => { event.preventDefault(); enterRoom("join"); });
+function closeMobileDrawers() {
+  elements.roomView.classList.remove("mobile-server-open", "mobile-members-open");
+  if (elements.mobileDrawerScrim) elements.mobileDrawerScrim.hidden = true;
+}
+function openMobileDrawer(kind) {
+  const isServer = kind === "server";
+  elements.roomView.classList.toggle("mobile-server-open", isServer);
+  elements.roomView.classList.toggle("mobile-members-open", !isServer);
+  if (elements.mobileDrawerScrim) elements.mobileDrawerScrim.hidden = false;
+}
+
+elements.mobileServerButton?.addEventListener("click", () => openMobileDrawer("server"));
+elements.mobileMembersButton?.addEventListener("click", () => openMobileDrawer("members"));
+elements.mobileDrawerScrim?.addEventListener("click", closeMobileDrawers);
 elements.copyCodeButton.addEventListener("click", copyRoomCode);
 elements.micButton.addEventListener("click", toggleMute);
 elements.deafenButton.addEventListener("click", toggleDeafen);
@@ -2250,6 +2274,21 @@ async function enterRoom(mode) {
     } else {
       state.server.ownerClientId = sanitizeClientId(state.server.ownerClientId) || state.clientId;
     }
+  }
+
+  if (isMobileRuntime()) {
+    // No Android/iOS o SFU dispensa PeerJS para entrar no servidor de voz.
+    const mobilePeerId = `mobile-${state.clientId.slice(0, 32)}`;
+    state.peer = {
+      id: mobilePeerId,
+      open: true,
+      disconnected: false,
+      destroyed: false,
+      close() {},
+      destroy() { this.destroyed = true; },
+    };
+    connectToHost(false);
+    return;
   }
 
   // Cloudflare é a autoridade do servidor. PeerJS fica apenas para mídia P2P.
@@ -5030,7 +5069,12 @@ function ensureValidView() {
 }
 function switchView(view) {
   if (view === "text" && !state.server.textChannel.exists) return; if (view === "voice" && !state.server.voiceChannel.exists) return;
-  state.currentView = view; if (view === "text") { state.unreadMessages = 0; state.unreadMentions = 0; } renderServerUI(); updateChatVisibility(); if (view === "text") window.setTimeout(() => { elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight; elements.chatInput.focus(); }, 80);
+  state.currentView = view;
+  closeMobileDrawers();
+  if (view === "text") { state.unreadMessages = 0; state.unreadMentions = 0; }
+  renderServerUI();
+  updateChatVisibility();
+  if (view === "text") window.setTimeout(() => { elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight; elements.chatInput.focus(); }, 80);
 }
 function renderServerUI() {
   ensureValidView(); const admin = canCurrentUserAdmin(); elements.serverNameDisplay.textContent = state.server.name; elements.roomCodeDisplay.textContent = currentInviteCode(); paintAvatar(elements.serverIconDisplay, state.server.name, state.server.icon); updateWindowTitle();
@@ -5767,7 +5811,109 @@ function toUint8Array(value) {
   return null;
 }
 
+const MOBILE_ATTACHMENT_DB_NAME = "resenhazinha-mobile-files";
+const MOBILE_ATTACHMENT_DB_VERSION = 1;
+let mobileAttachmentDbPromise = null;
+
+function supportsWebAttachmentStore() {
+  return typeof indexedDB !== "undefined";
+}
+
+function openMobileAttachmentDb() {
+  if (!supportsWebAttachmentStore()) return Promise.resolve(null);
+  if (mobileAttachmentDbPromise) return mobileAttachmentDbPromise;
+  mobileAttachmentDbPromise = new Promise((resolve, reject) => {
+    const request = indexedDB.open(MOBILE_ATTACHMENT_DB_NAME, MOBILE_ATTACHMENT_DB_VERSION);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains("attachments")) db.createObjectStore("attachments", { keyPath: "id" });
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error("attachment-db-open-failed"));
+  }).catch((error) => {
+    mobileAttachmentDbPromise = null;
+    throw error;
+  });
+  return mobileAttachmentDbPromise;
+}
+
 async function saveChatAttachmentBytes(id, bytes) {
+  const cleanId = sanitizeTransferId(id); const data = toUint8Array(bytes);
+  if (!cleanId || !data || data.byteLength > MAX_CHAT_ATTACHMENT_BYTES) return false;
+
+  if (window.resenhazinhaDesktop?.saveChatAttachment) {
+    const result = await window.resenhazinhaDesktop.saveChatAttachment({ id: cleanId, bytes: data });
+    return Boolean(result?.saved);
+  }
+
+  try {
+    const db = await openMobileAttachmentDb();
+    if (!db) return false;
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction("attachments", "readwrite");
+      tx.objectStore("attachments").put({ id: cleanId, bytes: data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) });
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error || new Error("attachment-db-write-failed"));
+      tx.onabort = () => reject(tx.error || new Error("attachment-db-write-aborted"));
+    });
+    return true;
+  } catch (error) {
+    console.warn("[Resenhazinha] Não consegui salvar anexo no armazenamento web.", error);
+    return false;
+  }
+}
+
+async function readStoredChatAttachment(id) {
+  const cleanId = sanitizeTransferId(id);
+  if (!cleanId) return null;
+
+  if (window.resenhazinhaDesktop?.readChatAttachment) {
+    const result = await window.resenhazinhaDesktop.readChatAttachment(cleanId); if (!result?.found) return null;
+    const bytes = toUint8Array(result.bytes); return bytes && bytes.byteLength <= MAX_CHAT_ATTACHMENT_BYTES ? new Uint8Array(bytes) : null;
+  }
+
+  try {
+    const db = await openMobileAttachmentDb();
+    if (!db) return null;
+    const record = await new Promise((resolve, reject) => {
+      const tx = db.transaction("attachments", "readonly");
+      const request = tx.objectStore("attachments").get(cleanId);
+      request.onsuccess = () => resolve(request.result || null);
+      request.onerror = () => reject(request.error || new Error("attachment-db-read-failed"));
+    });
+    const bytes = toUint8Array(record?.bytes);
+    return bytes && bytes.byteLength <= MAX_CHAT_ATTACHMENT_BYTES ? new Uint8Array(bytes) : null;
+  } catch (error) {
+    console.warn("[Resenhazinha] Não consegui ler anexo do armazenamento web.", error);
+    return null;
+  }
+}
+
+async function deleteStoredChatAttachment(id) {
+  const cleanId = sanitizeTransferId(id);
+  if (!cleanId) return;
+
+  if (window.resenhazinhaDesktop?.deleteChatAttachment) {
+    await window.resenhazinhaDesktop.deleteChatAttachment(cleanId).catch(() => undefined);
+    return;
+  }
+
+  try {
+    const db = await openMobileAttachmentDb();
+    if (!db) return;
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction("attachments", "readwrite");
+      tx.objectStore("attachments").delete(cleanId);
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error || new Error("attachment-db-delete-failed"));
+      tx.onabort = () => reject(tx.error || new Error("attachment-db-delete-aborted"));
+    });
+  } catch (error) {
+    console.warn("[Resenhazinha] Não consegui remover anexo do armazenamento web.", error);
+  }
+}
+
+
   const cleanId = sanitizeTransferId(id); const data = toUint8Array(bytes);
   if (!cleanId || !data || data.byteLength > MAX_CHAT_ATTACHMENT_BYTES || !window.resenhazinhaDesktop?.saveChatAttachment) return false;
   const result = await window.resenhazinhaDesktop.saveChatAttachment({ id: cleanId, bytes: data });
