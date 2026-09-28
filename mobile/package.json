@@ -1,0 +1,20 @@
+{
+  "name": "resenhazinha-mobile",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Shell Android do Resenhazinha usando a mesma aplicação web.",
+  "scripts": {
+    "android:add": "cap add android",
+    "android:sync": "cap sync android",
+    "android:open": "cap open android",
+    "android:run": "cap run android",
+    "android:apk": "cd android && gradlew.bat assembleDebug"
+  },
+  "dependencies": {
+    "@capacitor/android": "8.5.2",
+    "@capacitor/core": "8.5.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.5.2"
+  }
+}
