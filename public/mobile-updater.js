@@ -1,5 +1,5 @@
 (() => {
-  const MOBILE_VERSION = "1.0.6";
+  const MOBILE_VERSION = "1.0.7";
   const REPO = "Yazzdyz/Resenhazinha-DC-2.0";
 
   const isAndroidApp = () => {
@@ -85,6 +85,28 @@
       button.textContent = "Baixando...";
       window.AndroidUpdater.installApk(release.apkUrl);
     });
+  };
+
+  window.__resenhazinhaShowUpdateDialog = (version, apkUrl) => {
+    showUpdateDialog({ version: String(version || ""), apkUrl: String(apkUrl || "") });
+  };
+
+  window.__resenhazinhaUpdateResult = (payload) => {
+    const status = document.getElementById("update-status-label");
+    const button = document.getElementById("check-update-button");
+    if (status) {
+      if (payload?.updateAvailable) {
+        status.textContent = `Versão ${payload.latestVersion} disponível.`;
+      } else if (payload?.ok) {
+        status.textContent = `Você já está na versão mais recente (${payload.latestVersion || payload.currentVersion || "atual"}).`;
+      } else {
+        status.textContent = "Não consegui verificar agora. Tente novamente daqui a pouco.";
+      }
+    }
+    if (button) {
+      button.disabled = false;
+      button.textContent = "Verificar atualização";
+    }
   };
 
   const checkForUpdate = async () => {

@@ -116,19 +116,131 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(android.os.Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        getBridge().getWebView().addJavascriptInterface(new AndroidUpdater(this), "AndroidUpdater");
+        AndroidUpdater updater = new AndroidUpdater(this);
+        getBridge().getWebView().addJavascriptInterface(updater, "AndroidUpdater");
+        getBridge().getWebView().postDelayed(() -> updater.checkForUpdate(), 2500);
     }
 
     public static class AndroidUpdater {
         private final Context context;
+        private static final String REPO = "Yazzdyz/Resenhazinha-DC-2.0";
 
         AndroidUpdater(Context context) {
             this.context = context;
         }
 
         @JavascriptInterface
+        public void checkForUpdate() {
+            new Thread(this::checkForUpdateInternal).start();
+        }
+
+        @JavascriptInterface
         public void installApk(String apkUrl) {
             new Thread(() -> downloadAndInstall(apkUrl)).start();
+        }
+
+        private void checkForUpdateInternal() {
+            try {
+                URL url = new URL("https://api.github.com/repos/" + REPO + "/releases?per_page=20");
+                HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+                connection.setRequestProperty("Accept", "application/vnd.github+json");
+                connection.setRequestProperty("User-Agent", "Resenhazinha-Android");
+                connection.setInstanceFollowRedirects(true);
+                connection.setConnectTimeout(15000);
+                connection.setReadTimeout(20000);
+                connection.connect();
+
+                if (connection.getResponseCode() < 200 || connection.getResponseCode() >= 300) {
+                    connection.disconnect();
+                    notifyUpdateResult(false, false, getCurrentVersion(), null, null);
+                    return;
+                }
+
+                StringBuilder body = new StringBuilder();
+                try (InputStream input = connection.getInputStream()) {
+                    byte[] buffer = new byte[8192];
+                    int count;
+                    while ((count = input.read(buffer)) != -1) {
+                        body.append(new String(buffer, 0, count, java.nio.charset.StandardCharsets.UTF_8));
+                    }
+                } finally {
+                    connection.disconnect();
+                }
+
+                org.json.JSONArray releases = new org.json.JSONArray(body.toString());
+                String currentVersion = getCurrentVersion();
+                String latestVersion = currentVersion;
+                String latestApkUrl = null;
+
+                for (int i = 0; i < releases.length(); i++) {
+                    org.json.JSONObject release = releases.getJSONObject(i);
+                    if (release.optBoolean("draft") || release.optBoolean("prerelease")) continue;
+                    String tag = release.optString("tag_name", "");
+                    if (!tag.matches("(?i)mobile-v\\d+\\.\\d+\\.\\d+")) continue;
+                    String version = tag.replaceFirst("(?i)^mobile-v", "");
+                    if (compareVersions(version, latestVersion) <= 0) continue;
+
+                    org.json.JSONArray assets = release.optJSONArray("assets");
+                    if (assets == null) continue;
+                    for (int j = 0; j < assets.length(); j++) {
+                        org.json.JSONObject asset = assets.getJSONObject(j);
+                        String name = asset.optString("name", "");
+                        String downloadUrl = asset.optString("browser_download_url", "");
+                        if (name.toLowerCase(java.util.Locale.ROOT).endsWith(".apk") && !downloadUrl.isEmpty()) {
+                            latestVersion = version;
+                            latestApkUrl = downloadUrl;
+                            break;
+                        }
+                    }
+                }
+
+                boolean available = latestApkUrl != null;
+                notifyUpdateResult(true, available, currentVersion, latestVersion, latestApkUrl);
+                if (available) {
+                    showUpdateDialogNative(latestVersion, latestApkUrl);
+                }
+            } catch (Exception ignored) {
+                notifyUpdateResult(false, false, getCurrentVersion(), null, null);
+            }
+        }
+
+        private String getCurrentVersion() {
+            try {
+                android.content.pm.PackageInfo info = context.getPackageManager().getPackageInfo(context.getPackageName(), 0);
+                return info.versionName == null ? "0.0.0" : info.versionName;
+            } catch (Exception ignored) {
+                return "0.0.0";
+            }
+        }
+
+        private int compareVersions(String left, String right) {
+            String[] a = left.split("\\.");
+            String[] b = right.split("\\.");
+            for (int i = 0; i < 3; i++) {
+                int av = i < a.length ? parsePart(a[i]) : 0;
+                int bv = i < b.length ? parsePart(b[i]) : 0;
+                if (av != bv) return Integer.compare(av, bv);
+            }
+            return 0;
+        }
+
+        private int parsePart(String value) {
+            try { return Integer.parseInt(value.replaceAll("[^0-9].*", "")); }
+            catch (Exception ignored) { return 0; }
+        }
+
+        private void notifyUpdateResult(boolean ok, boolean updateAvailable, String currentVersion, String latestVersion, String apkUrl) {
+            String current = org.json.JSONObject.quote(currentVersion == null ? "" : currentVersion);
+            String latest = org.json.JSONObject.quote(latestVersion == null ? "" : latestVersion);
+            String script = "window.__resenhazinhaUpdateResult && window.__resenhazinhaUpdateResult({ok:" + ok + ",updateAvailable:" + updateAvailable + ",currentVersion:" + current + ",latestVersion:" + latest + "})";
+            getBridge().getWebView().post(() -> getBridge().getWebView().evaluateJavascript(script, null));
+        }
+
+        private void showUpdateDialogNative(String version, String apkUrl) {
+            String v = org.json.JSONObject.quote(version);
+            String u = org.json.JSONObject.quote(apkUrl);
+            String script = "window.__resenhazinhaShowUpdateDialog && window.__resenhazinhaShowUpdateDialog(" + v + "," + u + ")";
+            getBridge().getWebView().post(() -> getBridge().getWebView().evaluateJavascript(script, null));
         }
 
         private void downloadAndInstall(String apkUrl) {

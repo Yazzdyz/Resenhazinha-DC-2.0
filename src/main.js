@@ -3527,10 +3527,42 @@ async function loadAppInfo() {
 }
 
 async function checkForUpdatesFromSettings() {
-  if (!window.resenhazinhaDesktop?.checkForUpdate) { toast("A verificação automática está disponível no aplicativo Windows."); return; }
-  elements.checkUpdateButton.disabled = true;
-  elements.checkUpdateButton.textContent = "Verificando…";
-  elements.updateStatusLabel.textContent = "Consultando o GitHub Releases…";
+  if (isMobileRuntime() && typeof window.AndroidUpdater?.checkForUpdate === "function") {
+    if (elements.checkUpdateButton) {
+      elements.checkUpdateButton.disabled = true;
+      elements.checkUpdateButton.textContent = "Verificando…";
+    }
+    if (elements.updateStatusLabel) {
+      elements.updateStatusLabel.textContent = "Consultando o GitHub Releases…";
+    }
+    try {
+      window.AndroidUpdater.checkForUpdate();
+    } catch (_error) {
+      if (elements.checkUpdateButton) {
+        elements.checkUpdateButton.disabled = false;
+        elements.checkUpdateButton.textContent = "Verificar atualização";
+      }
+      if (elements.updateStatusLabel) {
+        elements.updateStatusLabel.textContent = "Não consegui verificar agora.";
+      }
+    }
+    return;
+  }
+
+  if (!window.resenhazinhaDesktop?.checkForUpdate) {
+    if (elements.updateStatusLabel) elements.updateStatusLabel.textContent = "A verificação automática está disponível no Windows.";
+    toast("A verificação automática não está disponível neste ambiente.", "error");
+    return;
+  }
+
+  if (elements.checkUpdateButton) {
+    elements.checkUpdateButton.disabled = true;
+    elements.checkUpdateButton.textContent = "Verificando…";
+  }
+  if (elements.updateStatusLabel) {
+    elements.updateStatusLabel.textContent = "Consultando o GitHub Releases…";
+  }
+
   try {
     const result = await window.resenhazinhaDesktop.checkForUpdate();
     if (result?.updateAvailable && result?.deferred) elements.updateStatusLabel.textContent = `Versão ${result.latestVersion} disponível. Você escolheu atualizar depois.`;
@@ -3540,8 +3572,10 @@ async function checkForUpdatesFromSettings() {
   } catch (_error) {
     elements.updateStatusLabel.textContent = "Não consegui verificar agora. Tente novamente daqui a pouco.";
   } finally {
-    elements.checkUpdateButton.disabled = false;
-    elements.checkUpdateButton.textContent = "Verificar atualização";
+    if (elements.checkUpdateButton) {
+      elements.checkUpdateButton.disabled = false;
+      elements.checkUpdateButton.textContent = "Verificar atualização";
+    }
   }
 }
 
