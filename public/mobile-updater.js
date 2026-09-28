@@ -1,5 +1,5 @@
 (() => {
-  const MOBILE_VERSION = "1.0.10";
+  const MOBILE_VERSION = "1.0.11";
   const REPO = "Yazzdyz/Resenhazinha-DC-2.0";
 
   const isAndroidApp = () => {
