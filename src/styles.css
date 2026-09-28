@@ -6558,6 +6558,10 @@ body[data-theme="light"] .member-profile-dialog::backdrop {
     touch-action: manipulation;
   }
 
+  #room-view {
+    touch-action: pan-y;
+  }
+
   button,
   input,
   textarea,
