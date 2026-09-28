@@ -2501,8 +2501,23 @@ function clearProfileMedia(sourcePeerId, message) {
 
 function sendOwnProfileMediaToHost() {
   if (!state.hostConnection?.open) return;
-  void sendProfileMedia(state.hostConnection, state.clientId, "avatar", state.avatarData);
-  void sendProfileMedia(state.hostConnection, state.clientId, "banner", state.bannerData);
+  const mobileTransfer = isMobileRuntime();
+  void sendProfileMedia(
+    state.hostConnection,
+    state.clientId,
+    "avatar",
+    state.avatarData,
+    "",
+    { mobile: mobileTransfer },
+  );
+  void sendProfileMedia(
+    state.hostConnection,
+    state.clientId,
+    "banner",
+    state.bannerData,
+    "",
+    { mobile: mobileTransfer },
+  );
 }
 
 function sendAllProfileMediaToGuest(connection) {
@@ -3036,6 +3051,7 @@ function handleHostMessage(message) {
 
   if (message.type === "profile-media-request-all") {
     if (state.isHost) {
+      const mobileProfile = Boolean(message.mobileProfile);
       const requesterClientId = sanitizeClientId(message.requesterClientId);
       if (!requesterClientId || requesterClientId === state.clientId) return;
 
