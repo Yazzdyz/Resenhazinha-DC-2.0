@@ -66,6 +66,8 @@ const UI_SOUND_URLS = {
 const uiSoundPool = new Map();
 let uiFallbackAudioContext = null;
 let chatFileDragDepth = 0;
+let mobileProfileMediaResyncTimers = [];
+let lastMobileProfileMediaResyncAt = 0;
 const PEER_OPTIONS = {
   host: "0.peerjs.com",
   port: 443,
@@ -1071,20 +1073,46 @@ async function persistProfileTextState() {
 
 function applyBannerSurface(element, banner, accent = "#6f6b9b") {
   const safeBanner = sanitizeProfileBanner(banner);
+  revokeMobileObjectUrl(element, "__resenhazinhaBannerObjectUrl");
+  element.dataset.resenhazinhaBannerSource = safeBanner || "";
   element.classList.toggle("has-image", Boolean(safeBanner));
+  element.style.backgroundSize = "cover";
+  element.style.backgroundPosition = "center";
+  element.style.backgroundRepeat = "no-repeat";
+
   if (safeBanner) {
-    element.style.backgroundImage = `linear-gradient(180deg, rgba(0,0,0,.04), rgba(0,0,0,.3)), url(${safeBanner})`;
-    element.style.backgroundSize = "cover";
-    element.style.backgroundPosition = "center";
-    element.style.backgroundRepeat = "no-repeat";
+    const gradient = "linear-gradient(180deg, rgba(0,0,0,.04), rgba(0,0,0,.3))";
+    element.style.backgroundImage = isMobileRuntime() ? gradient : `${gradient}, url(${safeBanner})`;
     element.style.backgroundColor = "#111";
-  } else {
-    element.style.backgroundImage = `linear-gradient(135deg, color-mix(in srgb, ${accent} 58%, #171719), color-mix(in srgb, ${accent} 20%, #08080a))`;
-    element.style.backgroundSize = "auto";
-    element.style.backgroundPosition = "center";
-    element.style.backgroundRepeat = "repeat";
-    element.style.backgroundColor = "#171719";
+
+    if (isMobileRuntime()) {
+      void (async () => {
+        try {
+          const response = await fetch(safeBanner);
+          if (!response.ok) throw new Error("banner-fetch");
+          const blob = await response.blob();
+          if (element.dataset.resenhazinhaBannerSource !== safeBanner) return;
+          const objectUrl = URL.createObjectURL(blob);
+          revokeMobileObjectUrl(element, "__resenhazinhaBannerObjectUrl");
+          if (element.dataset.resenhazinhaBannerSource !== safeBanner) {
+            URL.revokeObjectURL(objectUrl);
+            return;
+          }
+          element.__resenhazinhaBannerObjectUrl = objectUrl;
+          element.style.backgroundImage = `${gradient}, url(${objectUrl})`;
+        } catch (_error) {
+          if (element.dataset.resenhazinhaBannerSource === safeBanner) {
+            element.style.backgroundImage = `${gradient}, url(${safeBanner})`;
+          }
+        }
+      })();
+    }
+    return;
   }
+
+  element.style.backgroundImage = `linear-gradient(135deg, color-mix(in srgb, ${accent} 58%, #171719), color-mix(in srgb, ${accent} 20%, #08080a))`;
+  element.style.backgroundRepeat = "repeat";
+  element.style.backgroundColor = "#171719";
 }
 
 function sanitizeServerIcon(value) {
@@ -1989,9 +2017,10 @@ async function chooseAvatar() {
         toast("Essa foto ficou grande demais. Escolha uma imagem menor.", "error");
         return;
       }
-      const avatar = sanitizeAvatar(picked.value);
+      const prepared = await normalizeMobileSelectedProfileImage(picked.value, "avatar");
+      const avatar = sanitizeAvatar(prepared);
       if (!avatar) {
-        toast("Não consegui usar essa imagem.", "error");
+        toast("Essa foto não pôde ser preparada para o celular. Escolha uma imagem menor.", "error");
         return;
       }
       state.avatarData = avatar;
@@ -2032,9 +2061,10 @@ async function chooseProfileBanner() {
         toast("Esse banner ficou grande demais. Escolha uma imagem menor.", "error");
         return;
       }
-      const banner = sanitizeProfileBanner(picked.value);
+      const prepared = await normalizeMobileSelectedProfileImage(picked.value, "banner");
+      const banner = sanitizeProfileBanner(prepared);
       if (!banner) {
-        toast("Não consegui usar esse banner.", "error");
+        toast("Esse banner não pôde ser preparado para o celular. Escolha uma imagem menor.", "error");
         return;
       }
       state.bannerData = banner;
@@ -2134,6 +2164,79 @@ async function removeAvatar() {
   } catch (_error) {
     toast("Não consegui remover a foto agora.", "error");
   }
+}
+
+
+async function normalizeMobileSelectedProfileImage(dataUrl, kind) {
+  if (!isMobileRuntime()) return dataUrl;
+  const value = String(dataUrl || "");
+  if (!/^data:image\\/(?:png|jpe?g|webp|gif);base64,/i.test(value)) return null;
+
+  const mime = value.slice(5, value.indexOf(";")).toLowerCase();
+  const maxChars = kind === "avatar" ? 5_300_000 : 9_100_000;
+  if (value.length <= maxChars || mime === "image/gif") return value;
+
+  return new Promise((resolve) => {
+    const image = new Image();
+    image.decoding = "async";
+    image.onload = () => {
+      try {
+        const maxWidth = kind === "avatar" ? 512 : 1600;
+        const maxHeight = kind === "avatar" ? 512 : 900;
+        let width = Number(image.naturalWidth) || maxWidth;
+        let height = Number(image.naturalHeight) || maxHeight;
+        const scale = Math.min(1, maxWidth / width, maxHeight / height);
+        width = Math.max(1, Math.round(width * scale));
+        height = Math.max(1, Math.round(height * scale));
+
+        const canvas = document.createElement("canvas");
+        for (let attempt = 0; attempt < 8; attempt += 1) {
+          canvas.width = width;
+          canvas.height = height;
+          const context = canvas.getContext("2d", { alpha: true });
+          if (!context) break;
+          context.clearRect(0, 0, width, height);
+          context.drawImage(image, 0, 0, width, height);
+
+          const quality = Math.max(0.56, 0.90 - attempt * 0.05);
+          const output = canvas.toDataURL("image/webp", quality);
+          if (output.length <= maxChars) {
+            resolve(output);
+            return;
+          }
+
+          width = Math.max(kind === "avatar" ? 256 : 720, Math.round(width * 0.82));
+          height = Math.max(kind === "avatar" ? 256 : 420, Math.round(height * 0.82));
+        }
+      } catch (_error) {}
+      resolve(null);
+    };
+    image.onerror = () => resolve(null);
+    image.src = value;
+  });
+}
+
+function clearMobileProfileMediaResyncTimers() {
+  mobileProfileMediaResyncTimers.forEach((timer) => window.clearTimeout(timer));
+  mobileProfileMediaResyncTimers = [];
+}
+
+function scheduleMobileProfileMediaResync() {
+  if (!isMobileRuntime()) return;
+  const now = Date.now();
+  if (now - lastMobileProfileMediaResyncAt < 5000) return;
+  lastMobileProfileMediaResyncAt = now;
+  clearMobileProfileMediaResyncTimers();
+
+  [0, 1000, 3500].forEach((delay) => {
+    const timer = window.setTimeout(() => {
+      if (!state.hostConnection?.open) return;
+      try {
+        state.hostConnection.send({ type: "profile-media-request-all", mobileProfile: true });
+      } catch (_error) {}
+    }, delay);
+    mobileProfileMediaResyncTimers.push(timer);
+  });
 }
 
 function profileMediaLimit(kind) {
@@ -2847,6 +2950,7 @@ function handleHostMessage(message) {
     if (state.hostConnection?.open) {
       state.hostConnection.send({ type: "profile-media-request-all", mobileProfile: isMobileRuntime() });
       scheduleOwnProfileResync(320);
+      scheduleMobileProfileMediaResync();
     }
     return;
   }
@@ -2987,6 +3091,7 @@ function handleHostMessage(message) {
     ensureValidView(); renderServerUI(); renderMembers(); renderVoiceGrid(); renderScreenStage(); updateControlState();
     if (elements.serverDialog.open) renderServerSettings(); if (elements.memberDialog.open) renderMemberDialog();
     if (message.includeProfiles) renderChatHistory();
+    if (isMobileRuntime()) scheduleMobileProfileMediaResync();
     reconcileVoiceCalls(); reconcileScreenCalls(); reconcileCameraCalls();
     if (state.inVoice) scheduleMediaReconcileBurst();
     if (state.resumeVoiceAfterReconnect && !state.inVoice && state.server.voiceChannel.exists) {
@@ -7756,25 +7861,63 @@ function sanitizeAvatar(value) {
   return /^data:image\/(?:gif|png|jpe?g|webp);base64,[a-z0-9+/=]+$/i.test(value) ? value : null;
 }
 
+function revokeMobileObjectUrl(element, key) {
+  const current = element?.[key];
+  if (!current) return;
+  try { URL.revokeObjectURL(current); } catch (_error) {}
+  try { delete element[key]; } catch (_error) {}
+}
+
+async function hydrateMobileDataImage(image, dataUrl, container, key) {
+  if (!isMobileRuntime() || !image || !dataUrl) return;
+  try {
+    const response = await fetch(dataUrl);
+    if (!response.ok) throw new Error("image-fetch");
+    const blob = await response.blob();
+    if (!image.isConnected || image.dataset.resenhazinhaSource !== dataUrl) return;
+    const objectUrl = URL.createObjectURL(blob);
+    revokeMobileObjectUrl(container, key);
+    if (!image.isConnected || image.dataset.resenhazinhaSource !== dataUrl) {
+      URL.revokeObjectURL(objectUrl);
+      return;
+    }
+    container[key] = objectUrl;
+    image.src = objectUrl;
+  } catch (_error) {
+    if (image.isConnected && image.dataset.resenhazinhaSource === dataUrl) {
+      image.src = dataUrl;
+    }
+  }
+}
+
 function paintAvatar(container, name, avatar) {
   const safeAvatar = sanitizeAvatar(avatar);
+  revokeMobileObjectUrl(container, "__resenhazinhaAvatarObjectUrl");
   container.replaceChildren();
   container.dataset.tone = avatarTone(name);
   container.classList.toggle("has-image", Boolean(safeAvatar));
   if (!safeAvatar) {
     container.textContent = initialFor(name);
+    container.removeAttribute("data-resenhazinha-source");
     return;
   }
 
   const image = document.createElement("img");
-  image.src = safeAvatar;
   image.alt = "";
   image.draggable = false;
+  image.dataset.resenhazinhaSource = safeAvatar;
   image.addEventListener("error", () => {
+    if (image.dataset.resenhazinhaSource !== safeAvatar) return;
     container.classList.remove("has-image");
     container.textContent = initialFor(name);
   }, { once: true });
   container.append(image);
+
+  if (isMobileRuntime()) {
+    void hydrateMobileDataImage(image, safeAvatar, container, "__resenhazinhaAvatarObjectUrl");
+  } else {
+    image.src = safeAvatar;
+  }
 }
 
 function safeId(value) {

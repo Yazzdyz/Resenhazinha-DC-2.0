@@ -9,6 +9,7 @@
   "plugins": {
     "SystemBars": {
       "insetsHandling": "css",
+      "initialViewportFitValueHint": "cover",
       "style": "DARK",
       "hidden": false,
       "animation": "NONE"
