@@ -78,7 +78,7 @@ jobs:
 
   build-release-apk:
     name: Build Android release APK
-    if: ${{ vars.ANDROID_RELEASE_PUBLISH == 'true' }}
+    if: ${{ vars.ANDROID_RELEASE_PUBLISH == 'true' || contains(github.event.head_commit.message, 'release mobile') }}
     runs-on: ubuntu-latest
     env:
       ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
