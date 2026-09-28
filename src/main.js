@@ -2283,19 +2283,25 @@ function scheduleMobileProfileMediaResync() {
   lastMobileProfileMediaResyncAt = now;
   clearMobileProfileMediaResyncTimers();
 
-  [0, 1000, 3500].forEach((delay) => {
-    const timer = window.setTimeout(() => {
-      if (!state.hostConnection?.open) return;
-      try {
-        state.hostConnection.send({
-          type: "profile-media-request-all",
-          mobileProfile: true,
-          requesterClientId: state.clientId,
-        });
-      } catch (_error) {}
-    }, delay);
-    mobileProfileMediaResyncTimers.push(timer);
-  });
+  // Fotos/banners não podem disputar o canal de controle logo na entrada.
+  // Primeiro deixamos roster/presença/call estabilizarem; depois fazemos uma
+  // única sincronização de mídia como fallback para o envio inicial.
+  const timer = window.setTimeout(() => {
+    if (!state.hostConnection?.open) return;
+    const needsProfileMedia = state.members.some((member) => {
+      if (!member.clientId || member.clientId === state.clientId) return false;
+      return !member.avatar || !member.banner;
+    });
+    if (!needsProfileMedia) return;
+    try {
+      state.hostConnection.send({
+        type: "profile-media-request-all",
+        mobileProfile: true,
+        requesterClientId: state.clientId,
+      });
+    } catch (_error) {}
+  }, 700);
+  mobileProfileMediaResyncTimers.push(timer);
 }
 
 function profileMediaLimit(kind) {
@@ -2306,7 +2312,7 @@ function sanitizeProfileMedia(kind, value) {
   return kind === "avatar" ? sanitizeAvatar(value) : kind === "banner" ? sanitizeProfileBanner(value) : null;
 }
 
-async function sendProfileMedia(connection, clientId, kind, value, targetClientId = "") {
+async function sendProfileMedia(connection, clientId, kind, value, targetClientId = "", options = {}) {
   if (!connection?.open) return;
   const id = sanitizeClientId(clientId);
   const target = sanitizeClientId(targetClientId);
@@ -2314,6 +2320,8 @@ async function sendProfileMedia(connection, clientId, kind, value, targetClientI
 
   const safe = sanitizeProfileMedia(kind, value);
   const base = { clientId: id, ...(target ? { targetClientId: target } : {}) };
+  const mobileTransfer = Boolean(options?.mobile);
+  const chunkBytes = mobileTransfer ? 48 * 1024 : PROFILE_MEDIA_CHUNK_BYTES;
 
   if (!safe) {
     connection.send({ type: "profile-media-clear", kind, ...base });
@@ -2330,15 +2338,19 @@ async function sendProfileMedia(connection, clientId, kind, value, targetClientI
   });
 
   let index = 0;
-  for (let offset = 0; offset < safe.length; offset += PROFILE_MEDIA_CHUNK_BYTES, index += 1) {
+  for (let offset = 0; offset < safe.length; offset += chunkBytes, index += 1) {
     connection.send({
       type: "profile-media-chunk",
       transferId,
       index,
-      data: safe.slice(offset, offset + PROFILE_MEDIA_CHUNK_BYTES),
+      data: safe.slice(offset, offset + chunkBytes),
       ...(target ? { targetClientId: target } : {}),
     });
-    if (index % 8 === 7) await new Promise((resolve) => window.setTimeout(resolve, 0));
+    // No mobile, soltamos a fila de eventos a cada pedaço pequeno para que
+    // presença, chat e sinalização WebRTC/SFU consigam passar na frente.
+    if (mobileTransfer || index % 8 === 7) {
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    }
   }
 
   connection.send({
@@ -2536,7 +2548,11 @@ function publishProfile() {
       presence: normalizePresence(state.presenceStatus),
       clientId: state.clientId,
     });
-    sendOwnProfileMediaToHost();
+    if (isMobileRuntime()) {
+      scheduleOwnProfileResync(1000);
+    } else {
+      sendOwnProfileMediaToHost();
+    }
   }
 }
 
@@ -2792,7 +2808,7 @@ function connectToHost(isReconnect = false) {
     }
 
     startConnectionHeartbeat();
-    window.setTimeout(sendOwnProfileMediaToHost, 120);
+    window.setTimeout(sendOwnProfileMediaToHost, isMobileRuntime() ? 1000 : 120);
 
     if (!state.serverBinding) {
       saveServerBinding({
@@ -3027,8 +3043,22 @@ function handleHostMessage(message) {
       for (const member of members) {
         const memberClientId = sanitizeClientId(member.clientId);
         if (!memberClientId) continue;
-        if (member.avatar) void sendProfileMedia(state.hostConnection, memberClientId, "avatar", member.avatar, requesterClientId);
-        if (member.banner) void sendProfileMedia(state.hostConnection, memberClientId, "banner", member.banner, requesterClientId);
+        if (member.avatar) void sendProfileMedia(
+          state.hostConnection,
+          memberClientId,
+          "avatar",
+          member.avatar,
+          requesterClientId,
+          { mobile: mobileProfile },
+        );
+        if (member.banner) void sendProfileMedia(
+          state.hostConnection,
+          memberClientId,
+          "banner",
+          member.banner,
+          requesterClientId,
+          { mobile: mobileProfile },
+        );
       }
     }
     return;
@@ -3066,13 +3096,14 @@ function handleHostMessage(message) {
     setConnectionState("Nuvem conectada · mídia via Cloudflare", "ok");
     unlockUiAudio();
     if (state.hostConnection?.open) {
-      state.hostConnection.send({
-        type: "profile-media-request-all",
-        mobileProfile: isMobileRuntime(),
-        requesterClientId: state.clientId,
-      });
-      scheduleOwnProfileResync(320);
-      scheduleMobileProfileMediaResync();
+      if (!isMobileRuntime()) {
+        state.hostConnection.send({
+          type: "profile-media-request-all",
+          mobileProfile: false,
+          requesterClientId: state.clientId,
+        });
+      }
+      scheduleOwnProfileResync(isMobileRuntime() ? 1000 : 320);
     }
     return;
   }
