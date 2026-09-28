@@ -185,6 +185,7 @@ const state = {
   inVoice: false,
   voiceJoinedAt: null,
   voicePresenceRevision: 0,
+  voiceTransition: null,
   resumeVoiceAfterReconnect: false,
   screenAudioMuted: false,
   screenVolume: 1,
@@ -500,7 +501,12 @@ elements.removeAppBackgroundButton.addEventListener("click", async () => { await
 elements.appBackgroundBlurRange.addEventListener("input", () => { state.appBackgroundBlur = normalizeBackgroundBlur(elements.appBackgroundBlurRange.value); applyAppBackground(); renderBackgroundBlurValue(); });
 elements.appBackgroundZoomRange.addEventListener("input", () => { state.appBackgroundZoom = normalizeBackgroundZoom(elements.appBackgroundZoomRange.value); applyAppBackground(); renderAppBackgroundPreview(); renderAppearanceValues(); });
 elements.appFontScaleRange.addEventListener("input", () => { state.appFontScale = normalizeFontScale(elements.appFontScaleRange.value); applyFontScale(); renderAppearanceValues(); });
-elements.themeChoiceButtons.forEach((button) => button.addEventListener("click", () => { state.appTheme = normalizeTheme(button.dataset.themeChoice); applyUiTheme(); renderThemeChoices(); }));
+elements.themeChoiceButtons.forEach((button) => button.addEventListener("click", () => {
+  state.appTheme = normalizeTheme(button.dataset.themeChoice);
+  applyUiTheme();
+  renderThemeChoices();
+  void persistProfileTextState();
+}));
 elements.presenceChoiceButtons.forEach((button) => button.addEventListener("click", () => { void setPresenceStatus(button.dataset.presenceChoice); }));
 elements.userChooseAvatarButton.addEventListener("click", async () => { await chooseAvatar(); renderUserSettings(); });
 elements.userRemoveAvatarButton.addEventListener("click", async () => { await removeAvatar(); renderUserSettings(); });
@@ -649,22 +655,49 @@ function fallbackUiSound(kind, volume = 0.45) {
     uiFallbackAudioContext ||= new AudioContextCtor();
     const context = uiFallbackAudioContext;
     if (context.state === "suspended") void context.resume().catch(() => undefined);
+
     const now = context.currentTime;
-    const gain = context.createGain();
-    const osc = context.createOscillator();
+    const master = context.createGain();
+    master.gain.setValueAtTime(0.0001, now);
+    master.connect(context.destination);
+
     const patterns = {
-      message: [880, 0.055], voiceJoin: [620, 0.08], voiceLeave: [390, 0.09],
-      screenStart: [740, 0.07], screenStop: [460, 0.07], micMute: [360, 0.055],
-      micUnmute: [650, 0.055], deafen: [290, 0.075], undeafen: [560, 0.075],
+      message: [[880, 0.055]],
+      voiceJoin: [[520, 0.075], [760, 0.095]],
+      voiceLeave: [[760, 0.075], [500, 0.105]],
+      screenStart: [[740, 0.07]],
+      screenStop: [[460, 0.07]],
+      micMute: [[360, 0.055]],
+      micUnmute: [[650, 0.055]],
+      deafen: [[290, 0.075]],
+      undeafen: [[560, 0.075]],
     };
-    const [frequency, duration] = patterns[kind] || [520, 0.055];
-    osc.type = "sine";
-    osc.frequency.setValueAtTime(frequency, now);
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(Math.max(0.001, clampVolume(volume) * 0.12), now + 0.008);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
-    osc.connect(gain); gain.connect(context.destination);
-    osc.start(now); osc.stop(now + duration + 0.01);
+
+    const notes = patterns[kind] || [[520, 0.055]];
+    const totalDuration = notes.reduce((sum, [, duration]) => sum + duration + 0.012, 0);
+    const peak = Math.max(0.001, clampVolume(volume) * 0.12);
+    master.gain.exponentialRampToValueAtTime(peak, now + 0.008);
+    master.gain.exponentialRampToValueAtTime(0.0001, now + totalDuration);
+
+    let offset = 0;
+    for (const [frequency, duration] of notes) {
+      const osc = context.createOscillator();
+      const gain = context.createGain();
+      const start = now + offset;
+      const end = start + duration;
+
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(frequency, start);
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(1, start + 0.006);
+      gain.gain.exponentialRampToValueAtTime(0.0001, end);
+      osc.connect(gain);
+      gain.connect(master);
+      osc.start(start);
+      osc.stop(end + 0.01);
+
+      offset += duration + 0.012;
+    }
   } catch (_error) {
     // Feedback sonoro é opcional; nunca interfere no restante do app.
   }
@@ -692,6 +725,14 @@ function unlockUiAudio() {
 function playUiSound(kind, volume = 0.45) {
   if (state.microphoneTest?.silencingPlayback) return;
   unlockUiAudio();
+
+  // No Android/iOS o som local não depende de hotlink externo nem de uma
+  // reprodução atrasada por uma cadeia de awaits. O desktop mantém os sons
+  // originais do arquivo remoto.
+  if (isMobileRuntime()) {
+    fallbackUiSound(kind, volume);
+    return;
+  }
 
   const base = uiSoundElement(kind);
   if (!base) {
@@ -6101,38 +6142,68 @@ async function restartMicrophoneStream() {
 }
 
 async function joinVoiceChannel() {
-  if (!state.server.voiceChannel.exists || state.inVoice) { if (state.server.voiceChannel.exists) switchView("voice"); return; }
-  try {
-    await ensureMicrophoneStream();
-  } catch (_error) {
-    toast("Não consegui acessar o microfone. Libere a permissão para entrar na call.", "error");
+  if (!state.server.voiceChannel.exists || state.inVoice || state.voiceTransition) {
+    if (state.server.voiceChannel.exists && state.inVoice) switchView("voice");
     return;
   }
-  callSessions.beginSession("voice");
-  state.voicePresenceRevision = normalizeVoicePresenceRevision(state.voicePresenceRevision) + 1;
-  state.inVoice = true; state.voiceJoinedAt = Date.now(); state.resumeVoiceAfterReconnect = false;
-  unlockUiAudio();
-  applyLocalAudioState();
-  publishLocalStatus();
-  scheduleVoicePresenceSyncBurst();
-  try {
-    await voiceSfu.start();
-  } catch (error) {
-    console.warn("[Resenhazinha VoiceSFU] A conexão principal de voz entrou em recuperação.", error);
-    toast("A voz está reconectando ao servidor. A call continua aberta.", "error");
-  }
-  scheduleMediaReconcileBurst();
-  reconcileVoiceCalls();
-  renderVoiceGrid();
+
+  state.voiceTransition = "joining";
   updateControlState();
-  switchView("voice");
-  playUiSound("voiceJoin", 0.55);
-  toast(`Você entrou em ${state.server.voiceChannel.name}.`);
+
+  try {
+    await ensureMicrophoneStream();
+
+    if (state.voiceTransition !== "joining") return;
+
+    callSessions.beginSession("voice");
+    state.voicePresenceRevision = normalizeVoicePresenceRevision(state.voicePresenceRevision) + 1;
+    state.inVoice = true;
+    state.voiceJoinedAt = Date.now();
+    state.resumeVoiceAfterReconnect = false;
+    unlockUiAudio();
+    applyLocalAudioState();
+    publishLocalStatus();
+    scheduleVoicePresenceSyncBurst();
+    scheduleMediaReconcileBurst();
+
+    switchView("voice");
+    renderVoiceGrid();
+    updateControlState();
+    playUiSound("voiceJoin", 0.55);
+    toast(`Você entrou em ${state.server.voiceChannel.name}.`);
+
+    void voiceSfu.start().catch((error) => {
+      console.warn("[Resenhazinha VoiceSFU] A conexão principal de voz entrou em recuperação.", error);
+      if (state.inVoice) toast("A voz está reconectando ao servidor. A call continua aberta.", "error");
+    });
+
+    reconcileVoiceCalls();
+  } catch (_error) {
+    if (state.voiceTransition === "joining") {
+      state.voiceTransition = null;
+      updateControlState();
+    }
+    toast("Não consegui acessar o microfone. Libere a permissão para entrar na call.", "error");
+  } finally {
+    if (state.voiceTransition === "joining") {
+      state.voiceTransition = null;
+      updateControlState();
+    }
+  }
 }
 
 function leaveVoiceChannel(options = {}) {
-  if (!state.inVoice) { switchView(state.server.textChannel.exists ? "text" : "voice"); return; }
+  if (!state.inVoice || state.voiceTransition) {
+    if (!state.inVoice && !state.voiceTransition) switchView(state.server.textChannel.exists ? "text" : "voice");
+    return;
+  }
+
   const forced = Boolean(options?.forced);
+  state.voiceTransition = "leaving";
+  updateControlState();
+
+  playUiSound("voiceLeave", 0.55);
+
   if (state.screenStream) stopScreenShare();
   if (state.cameraStream) stopCamera();
   if (state.deafened) state.muted = Boolean(state.mutedBeforeDeafen);
@@ -6154,10 +6225,17 @@ function leaveVoiceChannel(options = {}) {
   elements.audioContainer.replaceChildren();
   stopAllSpeakingDetectors();
   stopMicrophoneCapture();
-  publishLocalStatus(); scheduleVoicePresenceSyncBurst(); renderVoiceGrid(); updateControlState();
-  playUiSound("voiceLeave", 0.55);
+  state.mediaReconcileTimers.forEach((timer) => window.clearTimeout(timer));
+  state.mediaReconcileTimers.clear();
+  publishLocalStatus();
+  scheduleVoicePresenceSyncBurst();
+  renderVoiceGrid();
+  updateControlState();
   if (state.server.textChannel.exists) switchView("text");
   toast(options?.message || "Você saiu da call e continuou no servidor pelo chat.");
+
+  state.voiceTransition = null;
+  updateControlState();
 }
 
 function resizeChatInput() {
@@ -7273,8 +7351,12 @@ function updateControlState() {
   elements.cameraButton.dataset.tooltip = state.cameraStream ? "Desligar câmera" : "Ligar câmera";
   elements.shareButton.classList.toggle("is-sharing", Boolean(state.screenStream)); elements.shareButton.disabled = !state.inVoice || !state.server.voiceChannel.exists; elements.shareButton.setAttribute("aria-label", state.screenStream ? "Parar compartilhamento" : "Compartilhar tela");
   elements.shareButton.dataset.tooltip = state.screenStream ? "Parar compartilhamento" : "Compartilhar tela";
-  elements.voiceJoinButton.hidden = state.inVoice || !state.server.voiceChannel.exists; elements.voiceLeaveButton.hidden = !state.inVoice || !state.server.voiceChannel.exists;
-  elements.leaveButton.hidden = !state.inVoice || !state.server.voiceChannel.exists; elements.leaveButton.disabled = !state.inVoice; elements.leaveButton.setAttribute("aria-label", "Sair da call e continuar no chat"); elements.leaveButton.title = "Sair da call e continuar no servidor";
+  elements.voiceJoinButton.hidden = state.inVoice || !state.server.voiceChannel.exists;
+  elements.voiceLeaveButton.hidden = !state.inVoice || !state.server.voiceChannel.exists;
+  elements.voiceJoinButton.disabled = state.voiceTransition === "joining" || state.voiceTransition === "leaving";
+  elements.voiceLeaveButton.disabled = !state.inVoice || state.voiceTransition === "joining" || state.voiceTransition === "leaving";
+  elements.leaveButton.hidden = !state.inVoice || !state.server.voiceChannel.exists;
+  elements.leaveButton.disabled = !state.inVoice || Boolean(state.voiceTransition); elements.leaveButton.setAttribute("aria-label", "Sair da call e continuar no chat"); elements.leaveButton.title = "Sair da call e continuar no servidor";
   const selfPresence = presenceLabel(state.presenceStatus);
   elements.selfState.textContent = !state.inVoice ? `${selfPresence} · fora da call` : state.deafened ? `${selfPresence} · áudio e microfone desativados` : state.serverMuted ? `${selfPresence} · mutado pelo servidor` : state.muted ? `${selfPresence} · microfone desligado` : `${selfPresence} · microfone ligado`;
   elements.selfState.dataset.presence = normalizePresence(state.presenceStatus);
