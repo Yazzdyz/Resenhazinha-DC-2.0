@@ -7076,3 +7076,108 @@ body.platform-mobile .screen-quality-label {
     cursor: pointer;
   }
 }
+
+
+/* Mobile drawer final — membros ocupam a tela como uma tela do Discord */
+@media (max-width: 760px) {
+  .members-panel {
+    top: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    width: 100vw !important;
+    min-width: 100vw !important;
+    max-width: none !important;
+    height: 100dvh !important;
+    padding-top: env(safe-area-inset-top) !important;
+    padding-bottom: env(safe-area-inset-bottom) !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: var(--theme-members) !important;
+    box-shadow: none !important;
+  }
+
+  .members-panel-header {
+    min-height: 56px !important;
+    padding: 0 18px !important;
+    border-bottom-color: var(--theme-line) !important;
+  }
+
+  .server-shell .members-panel-header span,
+  .server-shell .members-panel-header small,
+  .server-shell .server-member-item .member-copy {
+    opacity: 1 !important;
+    visibility: visible !important;
+    transform: none !important;
+    pointer-events: auto !important;
+  }
+
+  .server-shell .members-panel-header {
+    justify-content: space-between !important;
+  }
+
+  .server-shell .members-panel-header > div {
+    justify-content: flex-start !important;
+  }
+
+  .server-shell .server-member-list {
+    width: 100% !important;
+    padding: 10px 14px 24px !important;
+  }
+
+  .server-shell .server-member-item,
+  .server-shell .members-panel:hover .server-member-item,
+  .server-shell .members-panel:focus-within .server-member-item {
+    grid-template-columns: 44px minmax(0,1fr) auto !important;
+    justify-content: initial !important;
+    gap: 10px !important;
+    min-height: 56px !important;
+    padding: 7px 9px !important;
+  }
+
+  .server-shell .member-avatar-wrap,
+  .server-shell .server-member-item .avatar,
+  .server-shell .members-panel:hover .member-avatar-wrap,
+  .server-shell .members-panel:focus-within .member-avatar-wrap {
+    width: 44px !important;
+    height: 44px !important;
+  }
+
+  .server-shell .server-member-item .member-manage-button {
+    opacity: 0;
+    visibility: hidden;
+  }
+
+  .server-shell .server-member-item:hover .member-manage-button,
+  .server-shell .server-member-item .member-manage-button:focus-visible {
+    opacity: 1;
+    visibility: visible;
+  }
+
+  .mobile-drawer-scrim {
+    background: rgba(0,0,0,.62) !important;
+  }
+
+  .mobile-topbar {
+    border-bottom-color: var(--theme-line) !important;
+    background: var(--theme-header) !important;
+    color: var(--theme-text) !important;
+  }
+
+  .mobile-topbar-button {
+    color: var(--theme-text-soft) !important;
+  }
+
+  .mobile-topbar-button:active {
+    background: var(--theme-card-hover) !important;
+    color: var(--theme-text) !important;
+  }
+
+  .mobile-topbar-title span {
+    color: var(--theme-text-muted) !important;
+  }
+
+  .mobile-topbar-title strong {
+    color: var(--theme-text) !important;
+  }
+}
