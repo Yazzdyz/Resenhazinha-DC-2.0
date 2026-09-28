@@ -6339,7 +6339,10 @@ function leaveVoiceChannel(options = {}) {
   scheduleVoicePresenceSyncBurst();
   renderVoiceGrid();
   updateControlState();
+  renderMobileCallChatDrawer();
   elements.chatInput?.blur?.();
+  elements.chatInput?.setAttribute("readonly", "readonly");
+  window.setTimeout(() => elements.chatInput?.removeAttribute("readonly"), 180);
   if (state.chatFocusTimer) {
     window.clearTimeout(state.chatFocusTimer);
     state.chatFocusTimer = null;
@@ -6350,6 +6353,17 @@ function leaveVoiceChannel(options = {}) {
   state.voiceTransition = null;
   state.voiceTransitionId = "";
   updateControlState();
+  window.setTimeout(() => {
+    if (!state.inVoice && !state.voiceTransition) {
+      publishLocalStatus();
+      scheduleVoicePresenceSyncBurst();
+      void voiceSfu.stop({ notify: true }).catch(() => {});
+      cloudRtc.closeAll("voice", { notify: true, reason: "voice-leave-finalize" });
+      cloudRtc.closeAll("screen", { notify: true, reason: "voice-leave-finalize" });
+      renderMobileCallChatDrawer();
+      elements.chatInput?.blur?.();
+    }
+  }, 250);
 }
 
 function resizeChatInput() {
