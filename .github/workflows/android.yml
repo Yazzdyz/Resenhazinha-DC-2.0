@@ -78,7 +78,7 @@ jobs:
 
   build-release-apk:
     name: Build Android release APK
-    if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' && env.ANDROID_KEYSTORE_PASSWORD != '' && env.ANDROID_KEY_ALIAS != '' && env.ANDROID_KEY_PASSWORD != '' }}
+    if: ${{ vars.ANDROID_RELEASE_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     env:
       ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
