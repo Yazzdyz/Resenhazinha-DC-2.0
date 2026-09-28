@@ -1,4 +1,5 @@
 name: Publicar versão
+# Publicação oficial das correções de call e do cliente mobile.
 
 on:
   push:
