@@ -198,3 +198,20 @@ public class MainActivity extends BridgeActivity {
 `;
 
 await writeFile(mainActivityPath, nativeCode);
+const appGradlePath = path.join(androidRoot, "app/build.gradle");
+let appGradle = await readFile(appGradlePath, "utf8");
+
+if (!appGradle.includes("ANDROID_KEYSTORE_FILE")) {
+  appGradle = appGradle.replace(
+    /android\\s*\\{/,
+    "android {\\n    signingConfigs {\\n        release {\\n            storeFile file(System.getenv(\"ANDROID_KEYSTORE_FILE\"))\\n            storePassword System.getenv(\"ANDROID_KEYSTORE_PASSWORD\")\\n            keyAlias System.getenv(\"ANDROID_KEY_ALIAS\")\\n            keyPassword System.getenv(\"ANDROID_KEY_PASSWORD\")\\n        }\\n    }",
+  );
+
+  appGradle = appGradle.replace(
+    /buildTypes\\s*\\{/,
+    "buildTypes {\\n        release {\\n            signingConfig signingConfigs.release\\n        }",
+  );
+
+  await writeFile(appGradlePath, appGradle);
+}
+
