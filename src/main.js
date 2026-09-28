@@ -51,17 +51,17 @@ const CONNECTION_HEARTBEAT_MS = 12000;
 const CONNECTION_GRACE_MS = 30000;
 const MAX_SERVER_ROLES = 20;
 const UI_SOUND_URLS = {
-  // Sons clássicos do Discord hospedados pelo Myinstants. Se a internet falhar,
-  // playUiSound usa um feedback local sintetizado para nunca ficar mudo.
-  message: "https://www.myinstants.com/media/sounds/discord-notification.mp3",
-  voiceJoin: "https://www.myinstants.com/media/sounds/yt1s_nYWSz5R.mp3",
-  voiceLeave: "https://www.myinstants.com/media/sounds/y2mate_VKI8qDn.mp3",
-  screenStart: null,
-  screenStop: null,
-  micMute: "https://www.myinstants.com/media/sounds/discord-mute-sound-effect.mp3",
-  micUnmute: "https://www.myinstants.com/media/sounds/discord-unmute-sound.mp3",
-  deafen: "https://www.myinstants.com/media/sounds/discord-deafen_jvTyxZk.mp3",
-  undeafen: "https://www.myinstants.com/media/sounds/discord-undeafen.mp3",
+  // Arquivos locais do arquivo público de sons do Discord (dez/2025).
+  // No mobile, os sons não dependem de sites externos.
+  message: "/sounds/discord/message1.mp3",
+  voiceJoin: "/sounds/discord/user_join.mp3",
+  voiceLeave: "/sounds/discord/user_leave.mp3",
+  screenStart: "/sounds/discord/stream_started.mp3",
+  screenStop: "/sounds/discord/stream_ended.mp3",
+  micMute: "/sounds/discord/mute.mp3",
+  micUnmute: "/sounds/discord/unmute.mp3",
+  deafen: "/sounds/discord/deafen.mp3",
+  undeafen: "/sounds/discord/undeafen.mp3",
 };
 const uiSoundPool = new Map();
 let uiFallbackAudioContext = null;
@@ -362,7 +362,7 @@ const elements = {
   randomCodeButton: $("#random-code-button"), createButton: $("#create-room-button"), joinButton: $("#join-room-button"),
   lobbyStatus: $("#lobby-status"), lobbyAvatar: $("#lobby-avatar"), lobbyAvatarButton: $("#lobby-avatar-button"),
   chooseAvatarButton: $("#choose-avatar-button"), removeAvatarButton: $("#remove-avatar-button"),
-   mobileServerButton: $("#mobile-server-button"), mobileMembersButton: $("#mobile-members-button"), mobileDrawerScrim: $("#mobile-drawer-scrim"), mobileCallChatDrawer: $("#mobile-call-chat-drawer"), mobileCallChatClose: $("#mobile-call-chat-close"), mobileCallChatVoiceList: $("#mobile-call-chat-voice-list"), mobileCallChatCallStatus: $("#mobile-call-chat-call-status"), mobileCallChatOpenCall: $("#mobile-call-chat-open-call"), mobileCallChatPreview: $("#mobile-call-chat-preview"), mobileCallChatOpenChat: $("#mobile-call-chat-open-chat"), mobileTopbarKind: $("#mobile-topbar-kind"), mobileTopbarChannel: $("#mobile-topbar-channel"),
+   mobileServerButton: $("#mobile-server-button"), mobileMembersButton: $("#mobile-members-button"), mobileDrawerScrim: $("#mobile-drawer-scrim"), mobileTopbarKind: $("#mobile-topbar-kind"), mobileTopbarChannel: $("#mobile-topbar-channel"),
   serverNameDisplay: $("#server-name-display"), serverIconDisplay: $("#server-icon-display"),
   textChannelButton: $("#text-channel-button"), voiceChannelButton: $("#voice-channel-button"), textChannelName: $("#text-channel-name"), voiceChannelName: $("#voice-channel-name"),
   textChannelEmpty: $("#text-channel-empty"), voiceChannelEmpty: $("#voice-channel-empty"), createTextChannelButton: $("#create-text-channel-button"), createVoiceChannelButton: $("#create-voice-channel-button"),
@@ -443,79 +443,18 @@ elements.removeAvatarButton.addEventListener("click", removeAvatar);
 elements.selfAvatarButton.addEventListener("click", (event) => openMemberProfile(state.peer?.id, event.currentTarget));
 elements.joinForm.addEventListener("submit", (event) => { event.preventDefault(); enterRoom("join"); });
 function closeMobileDrawers() {
-  elements.roomView.classList.remove("mobile-server-open", "mobile-members-open", "mobile-call-chat-open");
+  elements.roomView.classList.remove("mobile-server-open", "mobile-members-open");
   if (elements.mobileDrawerScrim) elements.mobileDrawerScrim.hidden = true;
-  if (elements.mobileCallChatDrawer) elements.mobileCallChatDrawer.hidden = true;
 }
 function openMobileDrawer(kind) {
-  if (kind === "call-chat") {
-    elements.roomView.classList.remove("mobile-server-open", "mobile-members-open");
-    elements.roomView.classList.add("mobile-call-chat-open");
-    if (elements.mobileCallChatDrawer) elements.mobileCallChatDrawer.hidden = false;
-    renderMobileCallChatDrawer();
-  } else {
-    const isServer = kind === "server";
-    elements.roomView.classList.toggle("mobile-server-open", isServer);
-    elements.roomView.classList.toggle("mobile-members-open", !isServer);
-    elements.roomView.classList.remove("mobile-call-chat-open");
-    if (elements.mobileCallChatDrawer) elements.mobileCallChatDrawer.hidden = true;
-  }
+  const isServer = kind === "server";
+  elements.roomView.classList.toggle("mobile-server-open", isServer);
+  elements.roomView.classList.toggle("mobile-members-open", !isServer);
   if (elements.mobileDrawerScrim) elements.mobileDrawerScrim.hidden = false;
-}
-function renderMobileCallChatDrawer() {
-  if (!isMobileRuntime()) return;
-  const activeMembers = state.members.filter((member) => member.inVoice && !member.offlineSnapshot);
-  if (elements.mobileCallChatCallStatus) elements.mobileCallChatCallStatus.textContent = state.inVoice ? activeMembers.length + (activeMembers.length === 1 ? " pessoa na call" : " pessoas na call") : "Fora da call";
-  if (elements.mobileCallChatVoiceList) {
-    elements.mobileCallChatVoiceList.replaceChildren();
-    if (!activeMembers.length) {
-      const empty = document.createElement("span");
-      empty.className = "mobile-call-chat-empty";
-      empty.textContent = "Ninguém está na call.";
-      elements.mobileCallChatVoiceList.append(empty);
-    } else {
-      activeMembers.forEach((member) => {
-        const row = document.createElement("div");
-        row.className = "mobile-call-chat-voice";
-        const avatar = document.createElement("span");
-        avatar.className = "mobile-call-chat-voice__avatar";
-        avatar.textContent = String(member.name || "?").trim().charAt(0).toUpperCase();
-        const name = document.createElement("strong");
-        name.textContent = member.peerId === state.peer?.id ? String(member.name || "Você") + " (você)" : String(member.name || "Membro");
-        row.append(avatar, name);
-        elements.mobileCallChatVoiceList.append(row);
-      });
-    }
-  }
-  if (elements.mobileCallChatOpenCall) elements.mobileCallChatOpenCall.textContent = state.inVoice ? "Voltar para a call" : "Entrar na call";
-  if (elements.mobileCallChatPreview) {
-    elements.mobileCallChatPreview.replaceChildren();
-    const recent = state.chatMessages.slice(-3);
-    if (!recent.length) {
-      const empty = document.createElement("span");
-      empty.className = "mobile-call-chat-empty";
-      empty.textContent = "Nenhuma mensagem ainda.";
-      elements.mobileCallChatPreview.append(empty);
-    } else {
-      recent.forEach((message) => {
-        const row = document.createElement("div");
-        row.className = "mobile-call-chat-message";
-        const author = document.createElement("strong");
-        author.textContent = String(message.name || message.authorName || "Membro");
-        const text = document.createElement("span");
-        text.textContent = String(message.text || "📎 Anexo");
-        row.append(author, text);
-        elements.mobileCallChatPreview.append(row);
-      });
-    }
-  }
 }
 let mobileSwipeStart = null;
 
 elements.mobileServerButton?.addEventListener("click", () => openMobileDrawer("server"));
-elements.mobileCallChatClose?.addEventListener("click", closeMobileDrawers);
-elements.mobileCallChatOpenCall?.addEventListener("click", () => { closeMobileDrawers(); if (state.inVoice) switchView("voice"); else void joinVoiceChannel(); });
-elements.mobileCallChatOpenChat?.addEventListener("click", () => { closeMobileDrawers(); switchView("text", { focusInput: false }); });
 elements.mobileMembersButton?.addEventListener("click", () => openMobileDrawer("members"));
 elements.mobileDrawerScrim?.addEventListener("click", closeMobileDrawers);
 elements.roomView?.addEventListener("touchstart", (event) => {
@@ -536,7 +475,7 @@ elements.roomView?.addEventListener("touchend", (event) => {
   const deltaX = touch.clientX - mobileSwipeStart.x;
   const deltaY = touch.clientY - mobileSwipeStart.y;
   const horizontal = Math.abs(deltaX) > Math.abs(deltaY) * 1.25;
-  if (horizontal && deltaX >= 72 && mobileSwipeStart.edge) openMobileDrawer("call-chat");
+  if (horizontal && deltaX >= 72 && mobileSwipeStart.edge) elements.mobileServerButton?.click();
   else if (horizontal && deltaX <= -72) closeMobileDrawers();
   mobileSwipeStart = null;
 }, { passive: true });
