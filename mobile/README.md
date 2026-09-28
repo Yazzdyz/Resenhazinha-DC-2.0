@@ -19,6 +19,8 @@ npx cap open android
 
 O projeto Android é gerado pelo Capacitor e não precisa ser mantido manualmente no repositório nesta primeira etapa.
 
+O workflow `Android mobile` gera um APK debug automaticamente para validação.
+
 ## Escopo inicial
 
 - Chat e servidores
