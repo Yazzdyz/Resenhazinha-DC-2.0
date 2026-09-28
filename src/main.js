@@ -56,7 +56,7 @@ const UI_SOUND_URLS = isMobileRuntime()
       // O mobile não depende de sites externos para os sons.
       message: "/sounds/discord/message1.mp3",
       voiceJoin: "/sounds/discord/user_join.mp3",
-      voiceLeave: "/sounds/discord/user_leave.mp3",
+      voiceLeave: "/sounds/discord/disconnect.mp3",
       screenStart: "/sounds/discord/stream_started.mp3",
       screenStop: "/sounds/discord/stream_ended.mp3",
       micMute: "/sounds/discord/mute.mp3",
@@ -201,6 +201,7 @@ const state = {
   voiceTransition: null,
   voiceTransitionId: "",
   voiceLeaveLockRevision: 0,
+  voiceLeavePromise: null,
   chatFocusTimer: null,
   resumeVoiceAfterReconnect: false,
   screenAudioMuted: false,
@@ -2996,7 +2997,7 @@ function handleHostMessage(message) {
     scheduleOwnProfileResync(240);
     return;
   }
-
+\n  if (message.type === "profile-media-start") {\n    beginProfileMediaTransfer("cloud-host", message);\n    return;\n  }\n\n  if (message.type === "profile-media-chunk") {\n    receiveProfileMediaChunk(message);\n    return;\n  }\n\n  if (message.type === "profile-media-complete") {\n    void finishProfileMediaTransfer("cloud-host", message);\n    return;\n  }\n\n  if (message.type === "profile-media-clear") {\n    clearProfileMedia("cloud-host", message);\n    return;\n  }\n
   if (message.type === "profile-media-request-all") {
     if (state.isHost) {
       const requesterClientId = sanitizeClientId(message.requesterClientId);
@@ -6164,6 +6165,11 @@ async function restartMicrophoneStream() {
 }
 
 async function joinVoiceChannel() {
+  if (state.voiceLeavePromise) {
+    const pendingLeave = state.voiceLeavePromise;
+    await pendingLeave.catch(() => undefined);
+    if (state.voiceLeavePromise === pendingLeave) state.voiceLeavePromise = null;
+  }
   if (!state.server.voiceChannel.exists || state.inVoice || state.voiceTransition) {
     if (state.server.voiceChannel.exists && state.inVoice) switchView("voice");
     return;
@@ -6273,7 +6279,8 @@ function leaveVoiceChannel(options = {}) {
   state.voiceJoinedAt = null;
   callSessions.endSession("voice");
   callSessions.endSession("screen");
-  void voiceSfu.stop({ notify: true });
+  const voiceSfuStop = voiceSfu.stop({ notify: true });
+  state.voiceLeavePromise = voiceSfuStop;
   cloudRtc.closeAll("voice", { notify: true, reason: "voice-leave" });
   cloudRtc.closeAll("screen", { notify: true, reason: "voice-leave" });
   applyLocalAudioState();
@@ -6291,7 +6298,6 @@ function leaveVoiceChannel(options = {}) {
   scheduleVoicePresenceSyncBurst();
   renderVoiceGrid();
   updateControlState();
-  renderMobileCallChatDrawer();
   elements.chatInput?.blur?.();
   elements.chatInput?.setAttribute("readonly", "readonly");
   window.setTimeout(() => elements.chatInput?.removeAttribute("readonly"), 180);
@@ -6299,8 +6305,8 @@ function leaveVoiceChannel(options = {}) {
     window.clearTimeout(state.chatFocusTimer);
     state.chatFocusTimer = null;
   }
-  if (state.server.textChannel.exists) switchView("text", { focusInput: false });
-  toast(options?.message || "Você saiu da call e continuou no servidor pelo chat.");
+  switchView("voice", { focusInput: false });
+  toast(options?.message || "Você saiu da call.");
 
   state.voiceTransition = null;
   state.voiceTransitionId = "";
@@ -6312,8 +6318,8 @@ function leaveVoiceChannel(options = {}) {
       void voiceSfu.stop({ notify: true }).catch(() => {});
       cloudRtc.closeAll("voice", { notify: true, reason: "voice-leave-finalize" });
       cloudRtc.closeAll("screen", { notify: true, reason: "voice-leave-finalize" });
-      renderMobileCallChatDrawer();
       elements.chatInput?.blur?.();
+      if (state.voiceLeavePromise === voiceSfuStop) state.voiceLeavePromise = null;
     }
   }, 250);
 }
