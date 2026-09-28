@@ -2627,22 +2627,9 @@ async function enterRoom(mode) {
     }
   }
 
-  if (isMobileRuntime()) {
-    // No Android/iOS o SFU dispensa PeerJS para entrar no servidor de voz.
-    const mobilePeerId = `mobile-${state.clientId.slice(0, 32)}`;
-    state.peer = {
-      id: mobilePeerId,
-      open: true,
-      disconnected: false,
-      destroyed: false,
-      close() {},
-      destroy() { this.destroyed = true; },
-    };
-    connectToHost(false);
-    return;
-  }
-
-  // Cloudflare é a autoridade do servidor. PeerJS fica apenas para mídia P2P.
+  // O mobile usa o mesmo servidor PeerJS do PC para a camada de
+  // sinalização/mídia que ainda depende de PeerJS (ex.: câmera).
+  // A voz continua passando pelo Voice SFU do Cloudflare, sem alteração.
   state.peer = new Peer(undefined, PEER_OPTIONS);
   bindPeerEvents();
 }
