@@ -818,7 +818,10 @@ function stopSpeakingDetector(peerId) {
   const detector = state.speakingDetectors.get(id);
   if (detector) {
     detector.stopped = true;
-    if (detector.frame) cancelAnimationFrame(detector.frame);
+    if (detector.frame) {
+      if (detector.frameMode === "timeout") window.clearTimeout(detector.frame);
+      else cancelAnimationFrame(detector.frame);
+    }
     try { detector.source?.disconnect?.(); } catch (_error) {}
     try { detector.analyser?.disconnect?.(); } catch (_error) {}
     state.speakingDetectors.delete(id);
@@ -846,8 +849,27 @@ function startSpeakingDetector(peerId, stream) {
     analyser.smoothingTimeConstant = 0.58;
     source.connect(analyser);
     const samples = new Uint8Array(analyser.fftSize);
-    const detector = { source, analyser, samples, frame: 0, stopped: false, lastVoiceAt: 0, speaking: false };
+    const detector = {
+      source,
+      analyser,
+      samples,
+      frame: 0,
+      frameMode: "raf",
+      stopped: false,
+      lastVoiceAt: 0,
+      speaking: false,
+    };
     state.speakingDetectors.set(id, detector);
+
+    const scheduleNext = (tick) => {
+      if (isMobileRuntime()) {
+        detector.frameMode = "timeout";
+        detector.frame = window.setTimeout(tick, 90);
+      } else {
+        detector.frameMode = "raf";
+        detector.frame = requestAnimationFrame(tick);
+      }
+    };
 
     const tick = () => {
       if (detector.stopped || state.speakingDetectors.get(id) !== detector) return;
@@ -874,9 +896,9 @@ function startSpeakingDetector(peerId, stream) {
         detector.speaking = false;
         setPeerSpeaking(id, false);
       }
-      detector.frame = requestAnimationFrame(tick);
+      scheduleNext(tick);
     };
-    detector.frame = requestAnimationFrame(tick);
+    scheduleNext(tick);
   } catch (_error) {
     stopSpeakingDetector(id);
   }
@@ -7129,15 +7151,24 @@ async function collectVoiceStats(peerId, call) {
 function startConnectionHealthMonitor() {
   window.clearInterval(state.diagnosticsTimer);
   window.clearInterval(state.voiceUiTimer);
-  state.diagnosticsTimer = window.setInterval(() => {
-    state.voiceCalls.forEach((call, peerId) => { void collectVoiceStats(peerId, call); });
-    renderVoiceConnectionPanel();
-    if (elements.diagnosticsDialog?.open) void refreshDiagnostics();
-  }, DIAGNOSTIC_INTERVAL_MS);
+
+  // No mobile a voz usa o SFU do Cloudflare, então o monitor PeerJS abaixo
+  // não precisa rodar a cada 5s. Isso evita coleta/renderização desnecessária.
+  if (!isMobileRuntime()) {
+    state.diagnosticsTimer = window.setInterval(() => {
+      state.voiceCalls.forEach((call, peerId) => { void collectVoiceStats(peerId, call); });
+      renderVoiceConnectionPanel();
+      if (elements.diagnosticsDialog?.open) void refreshDiagnostics();
+    }, DIAGNOSTIC_INTERVAL_MS);
+  } else {
+    state.diagnosticsTimer = null;
+  }
+
   state.voiceUiTimer = window.setInterval(() => {
     refreshVoiceDurationLabels();
     renderVoiceConnectionPanel();
-  }, 1000);
+  }, isMobileRuntime() ? 1500 : 1000);
+
   renderVoiceConnectionPanel();
 }
 
