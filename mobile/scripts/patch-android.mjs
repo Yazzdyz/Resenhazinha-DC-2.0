@@ -18,8 +18,8 @@ const permissions = [
 for (const permission of permissions) {
   if (!manifest.includes(`android:name="${permission}"`)) {
     manifest = manifest.replace(
-      /<application\\b/,
-      `<uses-permission android:name="${permission}" />\\n\\n    <application`,
+      /<application\b/,
+      `<uses-permission android:name="${permission}" />\n\n    <application`,
     );
   }
 }
@@ -46,7 +46,7 @@ const provider = `
 `;
 
 if (!manifest.includes("com.yazzdyz.resenhazinha.fileprovider")) {
-  manifest = manifest.replace(/<\\/application>/, `${provider}    </application>`);
+  manifest = manifest.replace(/<\/application>/, `${provider}    </application>`);
 }
 
 await writeFile(manifestPath, manifest);
@@ -84,7 +84,7 @@ if (!mainActivityPath) {
 }
 
 const mainActivity = await readFile(mainActivityPath, "utf8");
-const packageMatch = mainActivity.match(/^package\\s+([a-zA-Z0-9_.]+);/m);
+const packageMatch = mainActivity.match(/^package\s+([a-zA-Z0-9_.]+);/m);
 if (!packageMatch) {
   throw new Error("Não foi possível descobrir o package da MainActivity.");
 }
