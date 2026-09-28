@@ -444,6 +444,14 @@ public class MainActivity extends BridgeActivity {
 `;
 
 await writeFile(mainActivityPath, nativeCode);
+const mobilePackage = JSON.parse(
+  await readFile(path.join(mobileRoot, "package.json"), "utf8"),
+);
+const mobileVersion = String(mobilePackage.version || "1.0.0").trim();
+const versionParts = mobileVersion.split(".").map((part) => Number.parseInt(part, 10) || 0);
+const mobileVersionCode =
+  versionParts[0] * 10000 + versionParts[1] * 100 + versionParts[2];
+
 const appGradlePath = path.join(androidRoot, "app/build.gradle");
 let appGradle = await readFile(appGradlePath, "utf8");
 
@@ -453,6 +461,18 @@ if (!/compileSdk(?:Version)?\s+/.test(appGradle)) {
     "android {\n    compileSdk 36",
   );
 }
+
+const defaultConfigNeedle = /defaultConfig\s*\{/;
+if (!defaultConfigNeedle.test(appGradle)) {
+  throw new Error("defaultConfig não encontrado no build.gradle.");
+}
+
+appGradle = appGradle.replace(
+  defaultConfigNeedle,
+  `defaultConfig {
+        versionCode ${mobileVersionCode}
+        versionName "${mobileVersion}"`,
+);
 
 if (!appGradle.includes("signingConfigs {")) {
   appGradle = appGradle.replace(
