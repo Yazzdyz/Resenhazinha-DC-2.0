@@ -4,5 +4,6 @@
   "webDir": "../dist",
   "android": {
     "allowMixedContent": false
-  }
+  },
+  "appendUserAgent": "ResenhazinhaMobile/1.0"
 }
