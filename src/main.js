@@ -6211,9 +6211,8 @@ async function joinVoiceChannel() {
   }
 }
 function leaveVoiceChannel(options = {}) {
-  const useMobileVoiceGuard = isMobileRuntime();
-  if (!state.inVoice || (useMobileVoiceGuard && state.voiceTransition)) {
-    if (!state.inVoice && !state.voiceTransition) switchView(state.server.textChannel.exists ? "text" : "voice");
+  if (!state.inVoice) {
+    if (!state.voiceTransition) switchView(state.server.textChannel.exists ? "text" : "voice");
     return;
   }
 
