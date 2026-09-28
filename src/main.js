@@ -1074,7 +1074,7 @@ async function persistProfileTextState() {
 function applyBannerSurface(element, banner, accent = "#6f6b9b") {
   const safeBanner = sanitizeProfileBanner(banner);
   revokeMobileObjectUrl(element, "__resenhazinhaBannerObjectUrl");
-  element.dataset.resenhazinhaBannerSource = safeBanner || "";
+  element.__resenhazinhaBannerSource = safeBanner || "";
   element.classList.toggle("has-image", Boolean(safeBanner));
   element.style.backgroundSize = "cover";
   element.style.backgroundPosition = "center";
@@ -1091,7 +1091,7 @@ function applyBannerSurface(element, banner, accent = "#6f6b9b") {
           const response = await fetch(safeBanner);
           if (!response.ok) throw new Error("banner-fetch");
           const blob = await response.blob();
-          if (element.dataset.resenhazinhaBannerSource !== safeBanner) return;
+          if (element.__resenhazinhaBannerSource !== safeBanner) return;
           const objectUrl = URL.createObjectURL(blob);
           revokeMobileObjectUrl(element, "__resenhazinhaBannerObjectUrl");
           if (element.dataset.resenhazinhaBannerSource !== safeBanner) {
@@ -2170,7 +2170,7 @@ async function removeAvatar() {
 async function normalizeMobileSelectedProfileImage(dataUrl, kind) {
   if (!isMobileRuntime()) return dataUrl;
   const value = String(dataUrl || "");
-  if (!/^data:image\\/(?:png|jpe?g|webp|gif);base64,/i.test(value)) return null;
+  if (!/^data:image\/(?:png|jpe?g|webp|gif);base64,/i.test(value)) return null;
 
   const mime = value.slice(5, value.indexOf(";")).toLowerCase();
   const maxChars = kind === "avatar" ? 5_300_000 : 9_100_000;
@@ -7874,7 +7874,7 @@ async function hydrateMobileDataImage(image, dataUrl, container, key) {
     const response = await fetch(dataUrl);
     if (!response.ok) throw new Error("image-fetch");
     const blob = await response.blob();
-    if (!image.isConnected || image.dataset.resenhazinhaSource !== dataUrl) return;
+    if (!image.isConnected || image.__resenhazinhaSource !== dataUrl) return;
     const objectUrl = URL.createObjectURL(blob);
     revokeMobileObjectUrl(container, key);
     if (!image.isConnected || image.dataset.resenhazinhaSource !== dataUrl) {
@@ -7898,14 +7898,13 @@ function paintAvatar(container, name, avatar) {
   container.classList.toggle("has-image", Boolean(safeAvatar));
   if (!safeAvatar) {
     container.textContent = initialFor(name);
-    container.removeAttribute("data-resenhazinha-source");
-    return;
+        return;
   }
 
   const image = document.createElement("img");
   image.alt = "";
   image.draggable = false;
-  image.dataset.resenhazinhaSource = safeAvatar;
+  image.__resenhazinhaSource = safeAvatar;
   image.addEventListener("error", () => {
     if (image.dataset.resenhazinhaSource !== safeAvatar) return;
     container.classList.remove("has-image");
