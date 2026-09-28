@@ -261,8 +261,8 @@ public class MainActivity extends BridgeActivity {
         }
 
         private int compareVersions(String left, String right) {
-            String[] a = left.split("\\.");
-            String[] b = right.split("\\.");
+            String[] a = left.split("\\\\.");
+            String[] b = right.split("\\\\.");
             for (int i = 0; i < 3; i++) {
                 int av = i < a.length ? parsePart(a[i]) : 0;
                 int bv = i < b.length ? parsePart(b[i]) : 0;
@@ -313,7 +313,7 @@ public class MainActivity extends BridgeActivity {
                 new AlertDialog.Builder(activity)
                     .setTitle("Nova versão disponível")
                     .setMessage(
-                        "A versão " + version + " do Resenhazinha está disponível.\n\n" +
+                        "A versão " + version + " do Resenhazinha está disponível.\\n\\n" +
                         "Você está usando a versão " + getInstalledVersion() + "."
                     )
                     .setNegativeButton("Agora não", null)
@@ -443,17 +443,37 @@ await writeFile(mainActivityPath, nativeCode);
 const appGradlePath = path.join(androidRoot, "app/build.gradle");
 let appGradle = await readFile(appGradlePath, "utf8");
 
-if (!appGradle.includes("ANDROID_KEYSTORE_FILE")) {
+if (!/compileSdk(?:Version)?\s+/.test(appGradle)) {
   appGradle = appGradle.replace(
     /android\s*\{/,
-    "android {\n    signingConfigs {\n        release {\n            storeFile file(System.getenv(\"ANDROID_KEYSTORE_FILE\"))\n            storePassword System.getenv(\"ANDROID_KEYSTORE_PASSWORD\")\n            keyAlias System.getenv(\"ANDROID_KEY_ALIAS\")\n            keyPassword System.getenv(\"ANDROID_KEY_PASSWORD\")\n        }\n    }",
+    "android {\n    compileSdk 36",
   );
+}
 
+if (!appGradle.includes("signingConfigs {")) {
+  appGradle = appGradle.replace(
+    /android\s*\{/,
+    `android {
+    signingConfigs {
+        release {
+            storeFile file(System.getenv("ANDROID_KEYSTORE_FILE") ?: "release.keystore")
+            storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD") ?: ""
+            keyAlias System.getenv("ANDROID_KEY_ALIAS") ?: ""
+            keyPassword System.getenv("ANDROID_KEY_PASSWORD") ?: ""
+        }
+    }`,
+  );
+}
+
+if (!/signingConfig\s+signingConfigs\.release/.test(appGradle)) {
   appGradle = appGradle.replace(
     /buildTypes\s*\{/,
-    "buildTypes {\n        release {\n            signingConfig signingConfigs.release\n        }",
+    `buildTypes {
+        release {
+            signingConfig signingConfigs.release
+        }`,
   );
-
-  await writeFile(appGradlePath, appGradle);
 }
+
+await writeFile(appGradlePath, appGradle);
 
