@@ -187,6 +187,8 @@ const state = {
   voicePresenceRevision: 0,
   voiceTransition: null,
   voiceTransitionId: "",
+  voiceLeaveLockRevision: 0,
+  chatFocusTimer: null,
   resumeVoiceAfterReconnect: false,
   screenAudioMuted: false,
   screenVolume: 1,
@@ -451,9 +453,33 @@ function openMobileDrawer(kind) {
   if (elements.mobileDrawerScrim) elements.mobileDrawerScrim.hidden = false;
 }
 
+let mobileSwipeStart = null;
+
 elements.mobileServerButton?.addEventListener("click", () => openMobileDrawer("server"));
 elements.mobileMembersButton?.addEventListener("click", () => openMobileDrawer("members"));
 elements.mobileDrawerScrim?.addEventListener("click", closeMobileDrawers);
+elements.roomView?.addEventListener("touchstart", (event) => {
+  if (!isMobileRuntime() || event.touches.length !== 1) return;
+  const touch = event.touches[0];
+  mobileSwipeStart = {
+    x: touch.clientX,
+    y: touch.clientY,
+    edge: touch.clientX <= 32,
+  };
+}, { passive: true });
+elements.roomView?.addEventListener("touchend", (event) => {
+  if (!isMobileRuntime() || !mobileSwipeStart || event.changedTouches.length !== 1) {
+    mobileSwipeStart = null;
+    return;
+  }
+  const touch = event.changedTouches[0];
+  const deltaX = touch.clientX - mobileSwipeStart.x;
+  const deltaY = touch.clientY - mobileSwipeStart.y;
+  const horizontal = Math.abs(deltaX) > Math.abs(deltaY) * 1.25;
+  if (horizontal && deltaX >= 72 && mobileSwipeStart.edge) openMobileDrawer("server");
+  else if (horizontal && deltaX <= -72) closeMobileDrawers();
+  mobileSwipeStart = null;
+}, { passive: true });
 elements.copyCodeButton.addEventListener("click", copyRoomCode);
 elements.micButton.addEventListener("click", toggleMute);
 elements.deafenButton.addEventListener("click", toggleDeafen);
@@ -733,31 +759,13 @@ function playUiSound(kind, volume = 0.45) {
     return;
   }
 
-  let started = false;
-  let fallbackPlayed = false;
-  const playFallback = () => {
-    if (started || fallbackPlayed) return;
-    fallbackPlayed = true;
-    fallbackUiSound(kind, volume);
-  };
-
   try {
     const audio = base.cloneNode(true);
     audio.volume = clampVolume(volume);
-    audio.addEventListener("playing", () => {
-      started = true;
-    }, { once: true });
-    const watchdog = window.setTimeout(playFallback, 450);
     const playback = audio.play();
-    if (playback?.then) playback.then(() => {
-      started = true;
-      window.clearTimeout(watchdog);
-    }).catch(() => {
-      window.clearTimeout(watchdog);
-      playFallback();
-    });
+    if (playback?.catch) playback.catch(() => fallbackUiSound(kind, volume));
   } catch (_error) {
-    playFallback();
+    fallbackUiSound(kind, volume);
   }
 }
 
@@ -1620,6 +1628,7 @@ function applyCloudVoicePresence(message) {
 
   const isSelf = clientId === state.clientId || peerId === state.peer?.id;
   if (isSelf && incomingRevision < normalizeVoicePresenceRevision(state.voicePresenceRevision)) return;
+  if (isSelf && state.voiceLeaveLockRevision > 0 && Boolean(raw.inVoice)) return;
 
   const member = previous || {
     peerId,
@@ -1661,10 +1670,8 @@ function applyCloudVoicePresence(message) {
 
   if (isSelf && shouldApplyVoicePresenceSnapshot(state.voicePresenceRevision, incomingRevision)) {
     state.voicePresenceRevision = Math.max(normalizeVoicePresenceRevision(state.voicePresenceRevision), incomingRevision);
-    if (!state.inVoice || !member.inVoice) {
-      state.inVoice = member.inVoice;
-      state.voiceJoinedAt = member.inVoice ? member.voiceJoinedAt : null;
-    }
+    state.inVoice = member.inVoice;
+    state.voiceJoinedAt = member.inVoice ? member.voiceJoinedAt : null;
     state.serverMuted = member.serverMuted;
     applyLocalAudioState();
   }
@@ -5531,14 +5538,24 @@ function ensureValidView() {
   if (state.currentView === "voice" && state.server.voiceChannel.exists) return;
   if (state.server.textChannel.exists) state.currentView = "text"; else if (state.server.voiceChannel.exists) state.currentView = "voice"; else state.currentView = "none";
 }
-function switchView(view) {
+function switchView(view, options = {}) {
   if (view === "text" && !state.server.textChannel.exists) return; if (view === "voice" && !state.server.voiceChannel.exists) return;
   state.currentView = view; closeMobileDrawers();
   closeMobileDrawers();
+  if (state.chatFocusTimer) {
+    window.clearTimeout(state.chatFocusTimer);
+    state.chatFocusTimer = null;
+  }
   if (view === "text") { state.unreadMessages = 0; state.unreadMentions = 0; }
   renderServerUI();
   updateChatVisibility();
-  if (view === "text") window.setTimeout(() => { elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight; elements.chatInput.focus(); }, 80);
+  if (view === "text") {
+    state.chatFocusTimer = window.setTimeout(() => {
+      state.chatFocusTimer = null;
+      elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight;
+      if (options.focusInput !== false) focusChatComposer();
+    }, 80);
+  }
 }
 function renderServerUI() {
   ensureValidView(); const admin = canCurrentUserAdmin(); elements.serverNameDisplay.textContent = state.server.name; elements.roomCodeDisplay.textContent = currentInviteCode(); paintAvatar(elements.serverIconDisplay, state.server.name, state.server.icon); updateWindowTitle();
@@ -6135,6 +6152,7 @@ async function restartMicrophoneStream() {
 }
 
 async function joinVoiceChannel() {
+  state.voiceLeaveLockRevision = 0;
   if (!state.server.voiceChannel.exists || state.inVoice || state.voiceTransition) {
     if (state.server.voiceChannel.exists && state.inVoice) switchView("voice");
     return;
@@ -6211,8 +6229,18 @@ async function joinVoiceChannel() {
   }
 }
 function leaveVoiceChannel(options = {}) {
-  if (!state.inVoice) {
-    if (!state.voiceTransition) switchView(state.server.textChannel.exists ? "text" : "voice");
+  const hasVoiceState = Boolean(
+    state.inVoice
+    || state.voiceTransition
+    || callSessions.sessionId("voice")
+    || voiceSfu.usesSfuPath()
+    || state.voiceCalls.size > 0
+    || state.localStream?.getAudioTracks?.().some((track) => track.readyState === "live")
+    || state.rawMicrophoneStream?.getAudioTracks?.().some((track) => track.readyState === "live")
+  );
+  if (!hasVoiceState) {
+    elements.chatInput?.blur?.();
+    if (!state.chatFocusTimer) switchView(state.server.textChannel.exists ? "text" : "voice", { focusInput: false });
     return;
   }
 
@@ -6228,6 +6256,7 @@ function leaveVoiceChannel(options = {}) {
   if (state.deafened) state.muted = Boolean(state.mutedBeforeDeafen);
   state.deafened = false; state.mutedBeforeDeafen = false;
   if (!forced) state.voicePresenceRevision = normalizeVoicePresenceRevision(state.voicePresenceRevision) + 1;
+  state.voiceLeaveLockRevision = normalizeVoicePresenceRevision(state.voicePresenceRevision);
   state.inVoice = false;
   state.voiceJoinedAt = null;
   callSessions.endSession("voice");
@@ -6250,7 +6279,12 @@ function leaveVoiceChannel(options = {}) {
   scheduleVoicePresenceSyncBurst();
   renderVoiceGrid();
   updateControlState();
-  if (state.server.textChannel.exists) switchView("text");
+  elements.chatInput?.blur?.();
+  if (state.chatFocusTimer) {
+    window.clearTimeout(state.chatFocusTimer);
+    state.chatFocusTimer = null;
+  }
+  if (state.server.textChannel.exists) switchView("text", { focusInput: false });
   toast(options?.message || "Você saiu da call e continuou no servidor pelo chat.");
 
   state.voiceTransition = null;
