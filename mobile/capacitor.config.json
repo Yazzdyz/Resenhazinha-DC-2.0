@@ -1,0 +1,8 @@
+{
+  "appId": "com.yazzdyz.resenhazinha",
+  "appName": "Resenhazinha",
+  "webDir": "../dist",
+  "android": {
+    "allowMixedContent": false
+  }
+}
