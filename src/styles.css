@@ -6981,6 +6981,165 @@ body.platform-mobile {
   min-width: 0;
 }
 
+@media (max-width: 760px) {
+  .mobile-call-chat-drawer {
+    position: fixed;
+    z-index: 460;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: min(360px, 91vw);
+    padding: max(16px, env(safe-area-inset-top)) 14px max(18px, env(safe-area-inset-bottom));
+    overflow-y: auto;
+    background: #151518;
+    border-right: 1px solid #2a2a2e;
+    box-shadow: 20px 0 70px rgba(0,0,0,.58);
+    transform: translateX(-102%);
+    transition: transform 180ms ease;
+  }
+
+  .mobile-call-chat-drawer[hidden] { display: block !important; }
+  .room.mobile-call-chat-open .mobile-call-chat-drawer { transform: translateX(0); }
+
+  .mobile-call-chat-drawer__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 18px;
+  }
+
+  .mobile-call-chat-drawer__head div {
+    display: grid;
+    gap: 3px;
+  }
+
+  .mobile-call-chat-drawer__head span {
+    color: #77777f;
+    font-size: 9px;
+    font-weight: 850;
+    letter-spacing: .12em;
+  }
+
+  .mobile-call-chat-drawer__head strong {
+    color: #f2f2f4;
+    font-size: 20px;
+  }
+
+  .mobile-call-chat-drawer__head button {
+    width: 36px;
+    height: 36px;
+    border: 0;
+    border-radius: 10px;
+    color: #bdbdc4;
+    background: #242428;
+    font-size: 25px;
+    line-height: 1;
+  }
+
+  .mobile-call-chat-section {
+    display: grid;
+    gap: 10px;
+    padding: 13px;
+    margin-bottom: 12px;
+    border: 1px solid #2a2a2f;
+    border-radius: 14px;
+    background: #1b1b1f;
+  }
+
+  .mobile-call-chat-section__title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .mobile-call-chat-section__title strong {
+    color: #ededf0;
+    font-size: 14px;
+  }
+
+  .mobile-call-chat-section__title em {
+    margin-left: auto;
+    color: #85858d;
+    font-size: 11px;
+    font-style: normal;
+  }
+
+  .mobile-call-chat-voice-list,
+  .mobile-call-chat-preview {
+    display: grid;
+    gap: 7px;
+    min-height: 42px;
+  }
+
+  .mobile-call-chat-voice,
+  .mobile-call-chat-message {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    min-width: 0;
+    padding: 8px;
+    border-radius: 10px;
+    background: #242428;
+  }
+
+  .mobile-call-chat-voice__avatar {
+    display: grid;
+    flex: 0 0 28px;
+    width: 28px;
+    height: 28px;
+    place-items: center;
+    border-radius: 50%;
+    color: #fff;
+    background: #3b3b42;
+    font-size: 11px;
+    font-weight: 800;
+  }
+
+  .mobile-call-chat-voice strong,
+  .mobile-call-chat-message strong {
+    overflow: hidden;
+    color: #dedee3;
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mobile-call-chat-message {
+    display: grid;
+    align-items: start;
+    gap: 2px;
+  }
+
+  .mobile-call-chat-message span {
+    overflow: hidden;
+    color: #9d9da5;
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mobile-call-chat-empty {
+    align-self: center;
+    padding: 8px 2px;
+    color: #77777f;
+    font-size: 11px;
+  }
+
+  .mobile-call-chat-action {
+    min-height: 40px;
+    border: 0;
+    border-radius: 10px;
+    color: #f0f0f2;
+    background: #303038;
+    font-weight: 750;
+  }
+
+  .mobile-call-chat-action:active {
+    transform: scale(.98);
+  }
+}
+
 body.platform-mobile .screen-card-volume,
 body.platform-mobile .screen-quality-label {
   display: none;
