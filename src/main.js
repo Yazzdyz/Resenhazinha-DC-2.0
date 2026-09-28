@@ -1088,16 +1088,17 @@ function applyBannerSurface(element, banner, accent = "#6f6b9b") {
     if (isMobileRuntime()) {
       void (async () => {
         try {
-          const response = await fetch(safeBanner);
-          if (!response.ok) throw new Error("banner-fetch");
-          const blob = await response.blob();
-          if (element.__resenhazinhaBannerSource !== safeBanner) return;
+          const blob = mobileDataUrlToBlob(safeBanner);
+          if (!blob || element.__resenhazinhaBannerSource !== safeBanner) return;
+
           const objectUrl = URL.createObjectURL(blob);
           revokeMobileObjectUrl(element, "__resenhazinhaBannerObjectUrl");
+
           if (element.__resenhazinhaBannerSource !== safeBanner) {
             URL.revokeObjectURL(objectUrl);
             return;
           }
+
           element.__resenhazinhaBannerObjectUrl = objectUrl;
           element.style.backgroundImage = `${gradient}, url(${objectUrl})`;
         } catch (_error) {
@@ -8018,19 +8019,49 @@ function revokeMobileObjectUrl(element, key) {
   try { delete element[key]; } catch (_error) {}
 }
 
+function mobileDataUrlToBlob(dataUrl) {
+  const value = String(dataUrl || "");
+  const match = value.match(/^data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/=]+)$/i);
+  if (!match) return null;
+
+  try {
+    const mime = match[1].toLowerCase();
+    const binary = atob(match[2]);
+    const bytes = new Uint8Array(binary.length);
+    const chunkSize = 0x8000;
+
+    for (let offset = 0; offset < binary.length; offset += chunkSize) {
+      const end = Math.min(offset + chunkSize, binary.length);
+      for (let index = offset; index < end; index += 1) {
+        bytes[index] = binary.charCodeAt(index);
+      }
+    }
+
+    return new Blob([bytes], { type: mime });
+  } catch (_error) {
+    return null;
+  }
+}
+
 async function hydrateMobileDataImage(image, dataUrl, container, key) {
   if (!isMobileRuntime() || !image || !dataUrl) return;
+
+  // Deixar o WebView tentar exibir a origem original imediatamente.
+  image.src = dataUrl;
+
   try {
-    const response = await fetch(dataUrl);
-    if (!response.ok) throw new Error("image-fetch");
-    const blob = await response.blob();
+    const blob = mobileDataUrlToBlob(dataUrl);
+    if (!blob) return;
     if (!image.isConnected || image.__resenhazinhaSource !== dataUrl) return;
+
     const objectUrl = URL.createObjectURL(blob);
     revokeMobileObjectUrl(container, key);
+
     if (!image.isConnected || image.__resenhazinhaSource !== dataUrl) {
       URL.revokeObjectURL(objectUrl);
       return;
     }
+
     container[key] = objectUrl;
     image.src = objectUrl;
   } catch (_error) {
