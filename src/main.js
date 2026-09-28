@@ -933,9 +933,24 @@ function presencePriority(value) {
   return { available: 0, away: 1, dnd: 2, offline: 3 }[normalizePresence(value)] ?? 0;
 }
 
+async function applyNativeSystemBars(theme) {
+  if (!isMobileRuntime()) return;
+  const systemBars = window.Capacitor?.Plugins?.SystemBars;
+  if (!systemBars?.setStyle) return;
+  const style = normalizeTheme(theme) === "light" ? "LIGHT" : "DARK";
+  try {
+    await systemBars.setStyle({ style, bar: "StatusBar" });
+    await systemBars.setStyle({ style, bar: "NavigationBar" });
+  } catch (_error) {
+    // Web fallback continues to work when the native SystemBars API is unavailable.
+  }
+}
+
 function applyUiTheme() {
-  document.body.dataset.theme = normalizeTheme(state.appTheme);
-  document.documentElement.dataset.theme = normalizeTheme(state.appTheme);
+  const theme = normalizeTheme(state.appTheme);
+  document.body.dataset.theme = theme;
+  document.documentElement.dataset.theme = theme;
+  void applyNativeSystemBars(theme);
 }
 
 function applyFontScale() {
