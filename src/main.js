@@ -1861,6 +1861,10 @@ async function loadStoredProfile() {
     const profile = await window.resenhazinhaDesktop?.loadProfile?.();
     state.avatarData = sanitizeAvatar(profile?.avatar);
     state.bannerData = sanitizeProfileBanner(profile?.banner);
+    if (isMobileRuntime()) {
+      state.avatarData = state.avatarData || sanitizeAvatar(await mobileProfileMediaGet("avatar"));
+      state.bannerData = state.bannerData || sanitizeProfileBanner(await mobileProfileMediaGet("banner"));
+    }
     state.profileBio = cleanBio(profile?.bio || fallback.bio || "");
     setAppBackgroundSource(profile?.background);
     state.appBackgroundBlur = normalizeBackgroundBlur(profile?.backgroundBlur ?? fallback.backgroundBlur ?? DEFAULT_BACKGROUND_BLUR);
@@ -1869,8 +1873,8 @@ async function loadStoredProfile() {
     state.appTheme = normalizeTheme(profile?.theme ?? fallback.theme ?? DEFAULT_THEME);
     state.presenceStatus = normalizePresence(profile?.presence ?? fallback.presence ?? DEFAULT_PRESENCE);
   } catch (_error) {
-    state.avatarData = null;
-    state.bannerData = sanitizeProfileBanner(fallback.banner);
+    state.avatarData = isMobileRuntime() ? sanitizeAvatar(await mobileProfileMediaGet("avatar")) : null;
+    state.bannerData = sanitizeProfileBanner(fallback.banner) || (isMobileRuntime() ? sanitizeProfileBanner(await mobileProfileMediaGet("banner")) : null);
     state.profileBio = cleanBio(fallback.bio || "");
     setAppBackgroundSource(fallback.background);
     state.appBackgroundBlur = normalizeBackgroundBlur(fallback.backgroundBlur ?? DEFAULT_BACKGROUND_BLUR);
@@ -1886,12 +1890,104 @@ async function loadStoredProfile() {
   renderPresenceChoices();
 }
 
+const MOBILE_PROFILE_DB_NAME = "resenhazinha-mobile-profile";
+const MOBILE_PROFILE_DB_VERSION = 1;
+
+function openMobileProfileDb() {
+  if (!("indexedDB" in window)) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const request = indexedDB.open(MOBILE_PROFILE_DB_NAME, MOBILE_PROFILE_DB_VERSION);
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains("media")) request.result.createObjectStore("media");
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => resolve(null);
+  });
+}
+
+async function mobileProfileMediaGet(kind) {
+  const db = await openMobileProfileDb();
+  if (!db) return null;
+  return new Promise((resolve) => {
+    const tx = db.transaction("media", "readonly");
+    const request = tx.objectStore("media").get(kind);
+    request.onsuccess = () => resolve(request.result?.value || null);
+    request.onerror = () => resolve(null);
+  });
+}
+
+async function mobileProfileMediaSet(kind, value) {
+  const db = await openMobileProfileDb();
+  if (!db) return;
+  await new Promise((resolve) => {
+    const tx = db.transaction("media", "readwrite");
+    tx.objectStore("media").put({ value, updatedAt: Date.now() }, kind);
+    tx.oncomplete = resolve;
+    tx.onerror = resolve;
+  });
+}
+
+async function mobileProfileMediaDelete(kind) {
+  const db = await openMobileProfileDb();
+  if (!db) return;
+  await new Promise((resolve) => {
+    const tx = db.transaction("media", "readwrite");
+    tx.objectStore("media").delete(kind);
+    tx.oncomplete = resolve;
+    tx.onerror = resolve;
+  });
+}
+
+function chooseMobileImage(accept = "image/*") {
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = accept;
+    input.style.display = "none";
+    document.body.append(input);
+    input.addEventListener("change", async () => {
+      const file = input.files?.[0] || null;
+      input.remove();
+      if (!file) return resolve(null);
+      try {
+        const value = await new Promise((done, fail) => {
+          const reader = new FileReader();
+          reader.onload = () => done(String(reader.result || ""));
+          reader.onerror = () => fail(reader.error || new Error("file"));
+          reader.readAsDataURL(file);
+        });
+        resolve({ file, value });
+      } catch (_error) {
+        resolve(null);
+      }
+    }, { once: true });
+    input.click();
+  });
+}
+
 async function chooseAvatar() {
-  if (!window.resenhazinhaDesktop?.chooseAvatar) {
-    toast("A troca de foto está disponível no aplicativo para Windows.");
-    return;
-  }
   try {
+    if (isMobileRuntime()) {
+      const picked = await chooseMobileImage("image/*");
+      if (!picked) return;
+      if (picked.file.size > 5_700_000) {
+        toast("Essa foto ficou grande demais. Escolha uma imagem menor.", "error");
+        return;
+      }
+      const avatar = sanitizeAvatar(picked.value);
+      if (!avatar) {
+        toast("Não consegui usar essa imagem.", "error");
+        return;
+      }
+      state.avatarData = avatar;
+      await mobileProfileMediaSet("avatar", avatar);
+      renderLocalAvatars();
+      publishProfile();
+      toast("Foto do perfil atualizada.");
+      return;
+    }
+
+    if (!window.resenhazinhaDesktop?.chooseAvatar) return;
     const result = await window.resenhazinhaDesktop.chooseAvatar();
     if (result?.canceled) return;
     if (result?.error === "too-large") {
@@ -1913,11 +2009,29 @@ async function chooseAvatar() {
 }
 
 async function chooseProfileBanner() {
-  if (!window.resenhazinhaDesktop?.chooseProfileBanner) {
-    toast("A troca de banner está disponível no aplicativo para Windows.");
-    return;
-  }
   try {
+    if (isMobileRuntime()) {
+      const picked = await chooseMobileImage("image/*");
+      if (!picked) return;
+      if (picked.file.size > 9_600_000) {
+        toast("Esse banner ficou grande demais. Escolha uma imagem menor.", "error");
+        return;
+      }
+      const banner = sanitizeProfileBanner(picked.value);
+      if (!banner) {
+        toast("Não consegui usar esse banner.", "error");
+        return;
+      }
+      state.bannerData = banner;
+      await mobileProfileMediaSet("banner", banner);
+      await persistProfileTextState();
+      renderUserSettings();
+      publishProfile();
+      toast("Banner do perfil atualizado.");
+      return;
+    }
+
+    if (!window.resenhazinhaDesktop?.chooseProfileBanner) return;
     const result = await window.resenhazinhaDesktop.chooseProfileBanner();
     if (result?.canceled) return;
     if (result?.error === "too-large") {
@@ -1996,7 +2110,8 @@ async function removeAppBackground() {
 
 async function removeAvatar() {
   try {
-    await window.resenhazinhaDesktop?.removeAvatar?.();
+    if (isMobileRuntime()) await mobileProfileMediaDelete("avatar");
+    else await window.resenhazinhaDesktop?.removeAvatar?.();
     state.avatarData = null;
     renderLocalAvatars();
     publishProfile();
@@ -5021,9 +5136,31 @@ function renderChatAttachments(container, message) {
 async function hydrateAttachmentPreview(meta, preview) {
   try {
     const url = await ensureAttachmentUrl(meta); if (!preview.isConnected) return; preview.replaceChildren();
-    if (attachmentKind(meta) === "image") { const image = document.createElement("img"); image.src = url; image.alt = meta.name; image.loading = "lazy"; preview.append(image); }
+    if (attachmentKind(meta) === "image") {
+      const image = document.createElement("img");
+      image.src = url; image.alt = meta.name; image.loading = "lazy";
+      image.tabIndex = 0; image.title = "Toque para abrir";
+      image.addEventListener("click", () => openImageViewer(url, meta.name));
+      image.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openImageViewer(url, meta.name); } });
+      preview.append(image);
+    }
     else { const video = document.createElement("video"); video.src = url; video.controls = true; video.preload = "metadata"; video.playsInline = true; preview.append(video); }
   } catch (_error) { if (preview.isConnected) { preview.replaceChildren(); const failed = document.createElement("span"); failed.className = "chat-attachment-failed"; failed.textContent = "Arquivo indisponível"; preview.append(failed); } }
+}
+
+function openImageViewer(url, name = "Imagem") {
+  let viewer = document.getElementById("mobile-image-viewer");
+  if (!viewer) {
+    viewer = document.createElement("div");
+    viewer.id = "mobile-image-viewer";
+    viewer.className = "mobile-image-viewer";
+    viewer.innerHTML = '<button type="button" class="mobile-image-viewer-close" aria-label="Fechar imagem">×</button><img alt="">';
+    viewer.addEventListener("click", (event) => { if (event.target === viewer || event.target.closest(".mobile-image-viewer-close")) viewer.hidden = true; });
+    document.body.append(viewer);
+  }
+  viewer.querySelector("img").src = url;
+  viewer.querySelector("img").alt = name;
+  viewer.hidden = false;
 }
 
 async function downloadChatAttachment(meta) {
