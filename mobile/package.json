@@ -2,7 +2,7 @@
   "name": "resenhazinha-mobile",
   "private": true,
   "version": "1.0.12",
-  "description": "Shell Android do Resenhazinha usando a mesma aplicação web. Auto-update nativo. Release 1.0.12.",
+  "description": "Shell Android do Resenhazinha usando a mesma aplicação web. Auto-update nativo. 1.0.12 em preparação.",
   "scripts": {
     "android:add": "cap add android",
     "android:sync": "cap sync android",
