@@ -2845,7 +2845,7 @@ function handleHostMessage(message) {
     setConnectionState("Nuvem conectada · mídia via Cloudflare", "ok");
     unlockUiAudio();
     if (state.hostConnection?.open) {
-      state.hostConnection.send({ type: "profile-media-request-all" });
+      state.hostConnection.send({ type: "profile-media-request-all", mobileProfile: isMobileRuntime() });
       scheduleOwnProfileResync(320);
     }
     return;
