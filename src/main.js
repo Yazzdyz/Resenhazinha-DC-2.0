@@ -2232,7 +2232,11 @@ function scheduleMobileProfileMediaResync() {
     const timer = window.setTimeout(() => {
       if (!state.hostConnection?.open) return;
       try {
-        state.hostConnection.send({ type: "profile-media-request-all", mobileProfile: true });
+        state.hostConnection.send({
+          type: "profile-media-request-all",
+          mobileProfile: true,
+          requesterClientId: state.clientId,
+        });
       } catch (_error) {}
     }, delay);
     mobileProfileMediaResyncTimers.push(timer);
@@ -2916,6 +2920,23 @@ function handleHostMessage(message) {
     return;
   }
 
+  if (message.type === "profile-media-request-all") {
+    if (state.isHost) {
+      const localSelf = localMember();
+      if (localSelf?.avatar) void sendProfileMedia(state.hostConnection, state.clientId, "avatar", localSelf.avatar);
+      if (localSelf?.banner) void sendProfileMedia(state.hostConnection, state.clientId, "banner", localSelf.banner);
+
+      const members = composeRosterMembers();
+      for (const member of members) {
+        const clientId = sanitizeClientId(member.clientId);
+        if (!clientId || clientId === state.clientId) continue;
+        if (member.avatar) void sendProfileMedia(state.hostConnection, clientId, "avatar", member.avatar);
+        if (member.banner) void sendProfileMedia(state.hostConnection, clientId, "banner", member.banner);
+      }
+    }
+    return;
+  }
+
   if (message.type === "cloud-ready") {
     state.cloudReady = true;
     if (state.isHost && normalizeInviteToken(message.inviteToken)) {
@@ -2948,7 +2969,11 @@ function handleHostMessage(message) {
     setConnectionState("Nuvem conectada · mídia via Cloudflare", "ok");
     unlockUiAudio();
     if (state.hostConnection?.open) {
-      state.hostConnection.send({ type: "profile-media-request-all", mobileProfile: isMobileRuntime() });
+      state.hostConnection.send({
+        type: "profile-media-request-all",
+        mobileProfile: isMobileRuntime(),
+        requesterClientId: state.clientId,
+      });
       scheduleOwnProfileResync(320);
       scheduleMobileProfileMediaResync();
     }
