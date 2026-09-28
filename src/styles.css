@@ -7190,30 +7190,30 @@ body.platform-mobile .screen-quality-label {
     --mobile-safe-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
   }
 
-  body.platform-mobile #room-view.server-shell {
+  #room-view.server-shell {
     height: calc(100dvh - var(--mobile-safe-top) - var(--mobile-safe-bottom)) !important;
     min-height: calc(100dvh - var(--mobile-safe-top) - var(--mobile-safe-bottom)) !important;
     margin-top: var(--mobile-safe-top) !important;
     margin-bottom: var(--mobile-safe-bottom) !important;
   }
 
-  body.platform-mobile .mobile-topbar {
+  .mobile-topbar {
     min-height: 50px !important;
     padding-top: 5px !important;
     padding-bottom: 5px !important;
   }
 
-  body.platform-mobile .server-sidebar,
-  body.platform-mobile .members-panel {
+  .server-sidebar,
+  .members-panel {
     top: var(--mobile-safe-top) !important;
     bottom: var(--mobile-safe-bottom) !important;
   }
 
-  body.platform-mobile .chat-form--full {
+  .chat-form--full {
     margin-bottom: 8px !important;
   }
 
-  body.platform-mobile .discord-call-footer {
+  .discord-call-footer {
     padding-bottom: 9px !important;
   }
 }
