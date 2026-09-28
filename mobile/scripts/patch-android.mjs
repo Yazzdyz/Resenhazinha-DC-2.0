@@ -219,9 +219,13 @@ public class MainActivity extends BridgeActivity {
                     if (release.optBoolean("draft") || release.optBoolean("prerelease")) continue;
 
                     String tag = release.optString("tag_name", "");
-                    if (!tag.matches("(?i)mobile-v\\d+\\.\\d+\\.\\d+")) continue;
+                    if (!tag.regionMatches(true, 0, "mobile-v", 0, 8)) continue;
 
-                    String version = tag.replaceFirst("(?i)^mobile-v", "");
+                    String version = tag.substring(8);
+                    String[] versionParts = version.split("[.]");
+                    if (versionParts.length != 3) continue;
+
+                    
                     if (compareVersions(version, latestVersion) <= 0) continue;
 
                     org.json.JSONArray assets = release.optJSONArray("assets");
