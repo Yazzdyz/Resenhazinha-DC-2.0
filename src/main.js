@@ -2252,23 +2252,46 @@ function sanitizeProfileMedia(kind, value) {
   return kind === "avatar" ? sanitizeAvatar(value) : kind === "banner" ? sanitizeProfileBanner(value) : null;
 }
 
-async function sendProfileMedia(connection, clientId, kind, value) {
+async function sendProfileMedia(connection, clientId, kind, value, targetClientId = "") {
   if (!connection?.open) return;
   const id = sanitizeClientId(clientId);
+  const target = sanitizeClientId(targetClientId);
   if (!id || !["avatar", "banner"].includes(kind)) return;
+
   const safe = sanitizeProfileMedia(kind, value);
+  const base = { clientId: id, ...(target ? { targetClientId: target } : {}) };
+
   if (!safe) {
-    connection.send({ type: "profile-media-clear", clientId: id, kind });
+    connection.send({ type: "profile-media-clear", kind, ...base });
     return;
   }
+
   const transferId = crypto.randomUUID();
-  connection.send({ type: "profile-media-start", transferId, clientId: id, kind, totalLength: safe.length });
+  connection.send({
+    type: "profile-media-start",
+    transferId,
+    kind,
+    totalLength: safe.length,
+    ...base,
+  });
+
   let index = 0;
   for (let offset = 0; offset < safe.length; offset += PROFILE_MEDIA_CHUNK_BYTES, index += 1) {
-    connection.send({ type: "profile-media-chunk", transferId, index, data: safe.slice(offset, offset + PROFILE_MEDIA_CHUNK_BYTES) });
+    connection.send({
+      type: "profile-media-chunk",
+      transferId,
+      index,
+      data: safe.slice(offset, offset + PROFILE_MEDIA_CHUNK_BYTES),
+      ...(target ? { targetClientId: target } : {}),
+    });
     if (index % 8 === 7) await new Promise((resolve) => window.setTimeout(resolve, 0));
   }
-  connection.send({ type: "profile-media-complete", transferId });
+
+  connection.send({
+    type: "profile-media-complete",
+    transferId,
+    ...(target ? { targetClientId: target } : {}),
+  });
 }
 
 function beginProfileMediaTransfer(sourcePeerId, message) {
@@ -2923,16 +2946,15 @@ function handleHostMessage(message) {
 
   if (message.type === "profile-media-request-all") {
     if (state.isHost) {
-      const localSelf = localMember();
-      if (localSelf?.avatar) void sendProfileMedia(state.hostConnection, state.clientId, "avatar", localSelf.avatar);
-      if (localSelf?.banner) void sendProfileMedia(state.hostConnection, state.clientId, "banner", localSelf.banner);
+      const requesterClientId = sanitizeClientId(message.requesterClientId);
+      if (!requesterClientId || requesterClientId === state.clientId) return;
 
       const members = composeRosterMembers();
       for (const member of members) {
-        const clientId = sanitizeClientId(member.clientId);
-        if (!clientId || clientId === state.clientId) continue;
-        if (member.avatar) void sendProfileMedia(state.hostConnection, clientId, "avatar", member.avatar);
-        if (member.banner) void sendProfileMedia(state.hostConnection, clientId, "banner", member.banner);
+        const memberClientId = sanitizeClientId(member.clientId);
+        if (!memberClientId) continue;
+        if (member.avatar) void sendProfileMedia(state.hostConnection, memberClientId, "avatar", member.avatar, requesterClientId);
+        if (member.banner) void sendProfileMedia(state.hostConnection, memberClientId, "banner", member.banner, requesterClientId);
       }
     }
     return;
