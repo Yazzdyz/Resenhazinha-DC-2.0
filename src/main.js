@@ -2997,7 +2997,27 @@ function handleHostMessage(message) {
     scheduleOwnProfileResync(240);
     return;
   }
-\n  if (message.type === "profile-media-start") {\n    beginProfileMediaTransfer("cloud-host", message);\n    return;\n  }\n\n  if (message.type === "profile-media-chunk") {\n    receiveProfileMediaChunk(message);\n    return;\n  }\n\n  if (message.type === "profile-media-complete") {\n    void finishProfileMediaTransfer("cloud-host", message);\n    return;\n  }\n\n  if (message.type === "profile-media-clear") {\n    clearProfileMedia("cloud-host", message);\n    return;\n  }\n
+
+  if (message.type === "profile-media-start") {
+    beginProfileMediaTransfer("cloud-host", message);
+    return;
+  }
+
+  if (message.type === "profile-media-chunk") {
+    receiveProfileMediaChunk(message);
+    return;
+  }
+
+  if (message.type === "profile-media-complete") {
+    void finishProfileMediaTransfer("cloud-host", message);
+    return;
+  }
+
+  if (message.type === "profile-media-clear") {
+    clearProfileMedia("cloud-host", message);
+    return;
+  }
+
   if (message.type === "profile-media-request-all") {
     if (state.isHost) {
       const requesterClientId = sanitizeClientId(message.requesterClientId);
@@ -6258,7 +6278,7 @@ function leaveVoiceChannel(options = {}) {
   );
   if (!hasVoiceState) {
     elements.chatInput?.blur?.();
-    if (!state.chatFocusTimer) switchView(state.server.textChannel.exists ? "text" : "voice", { focusInput: false });
+    switchView("voice", { focusInput: false });
     return;
   }
 
@@ -6311,15 +6331,16 @@ function leaveVoiceChannel(options = {}) {
   state.voiceTransition = null;
   state.voiceTransitionId = "";
   updateControlState();
+  voiceSfuStop.finally(() => {
+    if (state.voiceLeavePromise === voiceSfuStop) state.voiceLeavePromise = null;
+  }).catch(() => undefined);
   window.setTimeout(() => {
     if (!state.inVoice && !state.voiceTransition) {
       publishLocalStatus();
       scheduleVoicePresenceSyncBurst();
-      void voiceSfu.stop({ notify: true }).catch(() => {});
       cloudRtc.closeAll("voice", { notify: true, reason: "voice-leave-finalize" });
       cloudRtc.closeAll("screen", { notify: true, reason: "voice-leave-finalize" });
       elements.chatInput?.blur?.();
-      if (state.voiceLeavePromise === voiceSfuStop) state.voiceLeavePromise = null;
     }
   }, 250);
 }
