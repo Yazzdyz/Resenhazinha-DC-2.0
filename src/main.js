@@ -50,19 +50,32 @@ const MEDIA_NEGOTIATION_TIMEOUT_MS = 30_000;
 const CONNECTION_HEARTBEAT_MS = 12000;
 const CONNECTION_GRACE_MS = 30000;
 const MAX_SERVER_ROLES = 20;
-const UI_SOUND_URLS = {
-  // Arquivos locais do arquivo público de sons do Discord (dez/2025).
-  // No mobile, os sons não dependem de sites externos.
-  message: "/sounds/discord/message1.mp3",
-  voiceJoin: "/sounds/discord/user_join.mp3",
-  voiceLeave: "/sounds/discord/user_leave.mp3",
-  screenStart: "/sounds/discord/stream_started.mp3",
-  screenStop: "/sounds/discord/stream_ended.mp3",
-  micMute: "/sounds/discord/mute.mp3",
-  micUnmute: "/sounds/discord/unmute.mp3",
-  deafen: "/sounds/discord/deafen.mp3",
-  undeafen: "/sounds/discord/undeafen.mp3",
-};
+const UI_SOUND_URLS = isMobileRuntime()
+  ? {
+      // Arquivos locais do arquivo público de sons do Discord (dez/2025).
+      // O mobile não depende de sites externos para os sons.
+      message: "/sounds/discord/message1.mp3",
+      voiceJoin: "/sounds/discord/user_join.mp3",
+      voiceLeave: "/sounds/discord/user_leave.mp3",
+      screenStart: "/sounds/discord/stream_started.mp3",
+      screenStop: "/sounds/discord/stream_ended.mp3",
+      micMute: "/sounds/discord/mute.mp3",
+      micUnmute: "/sounds/discord/unmute.mp3",
+      deafen: "/sounds/discord/deafen.mp3",
+      undeafen: "/sounds/discord/undeafen.mp3",
+    }
+  : {
+      // Mantém o comportamento e os sons já usados no PC.
+      message: "https://www.myinstants.com/media/sounds/discord-notification.mp3",
+      voiceJoin: "https://www.myinstants.com/media/sounds/yt1s_nYWSz5R.mp3",
+      voiceLeave: "https://www.myinstants.com/media/sounds/y2mate_VKI8qDn.mp3",
+      screenStart: null,
+      screenStop: null,
+      micMute: "https://www.myinstants.com/media/sounds/discord-mute-sound-effect.mp3",
+      micUnmute: "https://www.myinstants.com/media/sounds/discord-unmute-sound.mp3",
+      deafen: "https://www.myinstants.com/media/sounds/discord-deafen_jvTyxZk.mp3",
+      undeafen: "https://www.myinstants.com/media/sounds/discord-undeafen.mp3",
+    };
 const uiSoundPool = new Map();
 let uiFallbackAudioContext = null;
 let chatFileDragDepth = 0;
