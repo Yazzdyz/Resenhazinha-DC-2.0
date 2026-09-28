@@ -3517,12 +3517,27 @@ function renderRoleSettings() {
 }
 
 async function loadAppInfo() {
-  try {
-    state.appInfo = await window.resenhazinhaDesktop?.getAppInfo?.() || { version: "4.3.0", platform: navigator.platform, packaged: false };
-  } catch (_error) {
-    state.appInfo = { version: "4.3.0", platform: navigator.platform, packaged: false };
+  if (isMobileRuntime() && typeof window.AndroidUpdater?.getCurrentVersion === "function") {
+    try {
+      state.appInfo = {
+        version: window.AndroidUpdater.getCurrentVersion() || "0.0.0",
+        platform: "android",
+        packaged: true,
+      };
+    } catch (_error) {
+      state.appInfo = { version: "0.0.0", platform: "android", packaged: true };
+    }
+  } else {
+    try {
+      state.appInfo = await window.resenhazinhaDesktop?.getAppInfo?.() || { version: "4.3.0", platform: navigator.platform, packaged: false };
+    } catch (_error) {
+      state.appInfo = { version: "4.3.0", platform: navigator.platform, packaged: false };
+    }
   }
-  if (elements.appVersionLabel) elements.appVersionLabel.textContent = `v${state.appInfo.version || "4.3.0"}`;
+
+  if (elements.appVersionLabel) {
+    elements.appVersionLabel.textContent = `v${state.appInfo.version || "4.3.0"}`;
+  }
   return state.appInfo;
 }
 
@@ -7911,7 +7926,7 @@ async function hydrateMobileDataImage(image, dataUrl, container, key) {
     if (!image.isConnected || image.__resenhazinhaSource !== dataUrl) return;
     const objectUrl = URL.createObjectURL(blob);
     revokeMobileObjectUrl(container, key);
-    if (!image.isConnected || image.dataset.resenhazinhaSource !== dataUrl) {
+    if (!image.isConnected || image.__resenhazinhaSource !== dataUrl) {
       URL.revokeObjectURL(objectUrl);
       return;
     }
