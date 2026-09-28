@@ -1,13 +1,20 @@
 (() => {
-  const MOBILE_VERSION = "1.0.1";
+  const MOBILE_VERSION = "1.0.4";
   const REPO = "Yazzdyz/Resenhazinha-DC-2.0";
 
-  const isAndroidApp =
-    typeof window !== "undefined" &&
-    window.Capacitor?.getPlatform?.() === "android" &&
-    typeof window.AndroidUpdater?.installApk === "function";
+  const isAndroidApp = () => {
+    if (typeof window === "undefined") return false;
+    const ua = String(navigator.userAgent || "");
+    return /Android/i.test(ua) && (
+      /ResenhazinhaMobile/i.test(ua) ||
+      window.Capacitor?.getPlatform?.() === "android" ||
+      typeof window.AndroidUpdater !== "undefined"
+    );
+  };
 
-  if (!isAndroidApp) return;
+  const hasNativeUpdater = () =>
+    typeof window !== "undefined" &&
+    typeof window.AndroidUpdater?.installApk === "function";
 
   const parseVersion = (value) =>
     String(value || "")
@@ -17,13 +24,13 @@
       .map((part) => Number.parseInt(part, 10) || 0)
       .slice(0, 3);
 
-  const isNewer = (remote, local) => {
-    const a = parseVersion(remote);
-    const b = parseVersion(local);
+  const compareVersions = (left, right) => {
+    const a = parseVersion(left);
+    const b = parseVersion(right);
     for (let i = 0; i < 3; i += 1) {
-      if (a[i] !== b[i]) return a[i] > b[i];
+      if (a[i] !== b[i]) return a[i] > b[i] ? 1 : -1;
     }
-    return false;
+    return 0;
   };
 
   const escapeHtml = (value) =>
@@ -59,29 +66,52 @@
     document.body.appendChild(overlay);
 
     overlay.querySelector("#mobile-update-later").addEventListener("click", () => overlay.remove());
-    overlay.querySelector("#mobile-update-now").addEventListener("click", () => {
+    overlay.querySelector("#mobile-update-now").addEventListener("click", async () => {
       const button = overlay.querySelector("#mobile-update-now");
       button.disabled = true;
+      button.textContent = "Preparando...";
+
+      for (let attempt = 0; attempt < 40 && !hasNativeUpdater(); attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+
+      if (!hasNativeUpdater()) {
+        button.disabled = false;
+        button.textContent = "Atualizar";
+        window.open(release.apkUrl, "_blank");
+        return;
+      }
+
       button.textContent = "Baixando...";
       window.AndroidUpdater.installApk(release.apkUrl);
     });
   };
 
   const checkForUpdate = async () => {
+    if (!isAndroidApp()) return;
+
     try {
       const response = await fetch(
         `https://api.github.com/repos/${REPO}/releases?per_page=20`,
-        { headers: { Accept: "application/vnd.github+json" }, cache: "no-store" }
+        {
+          headers: { Accept: "application/vnd.github+json" },
+          cache: "no-store",
+        }
       );
 
       if (!response.ok) return;
 
       const releases = await response.json();
       const release = releases
-        .filter((item) => !item.draft && !item.prerelease && /^mobile-v\d+\.\d+\.\d+$/i.test(item.tag_name))
-        .sort((a, b) => (isNewer(a.tag_name, b.tag_name) ? -1 : 1))[0];
+        .filter(
+          (item) =>
+            !item.draft &&
+            !item.prerelease &&
+            /^mobile-v\d+\.\d+\.\d+$/i.test(item.tag_name)
+        )
+        .sort((a, b) => compareVersions(b.tag_name, a.tag_name))[0];
 
-      if (!release || !isNewer(release.tag_name, MOBILE_VERSION)) return;
+      if (!release || compareVersions(release.tag_name, MOBILE_VERSION) <= 0) return;
 
       const apk = release.assets?.find((asset) => /.apk$/i.test(asset.name));
       if (!apk?.browser_download_url) return;
@@ -95,9 +125,11 @@
     }
   };
 
+  const start = () => setTimeout(checkForUpdate, 1800);
+
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", () => setTimeout(checkForUpdate, 1800), { once: true });
+    document.addEventListener("DOMContentLoaded", start, { once: true });
   } else {
-    setTimeout(checkForUpdate, 1800);
+    start();
   }
 })();
