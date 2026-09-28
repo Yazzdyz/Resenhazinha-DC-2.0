@@ -1,0 +1,103 @@
+(() => {
+  const MOBILE_VERSION = "1.0.1";
+  const REPO = "Yazzdyz/Resenhazinha-DC-2.0";
+
+  const isAndroidApp =
+    typeof window !== "undefined" &&
+    window.Capacitor?.getPlatform?.() === "android" &&
+    typeof window.AndroidUpdater?.installApk === "function";
+
+  if (!isAndroidApp) return;
+
+  const parseVersion = (value) =>
+    String(value || "")
+      .replace(/^mobile-v/i, "")
+      .replace(/^v/i, "")
+      .split(".")
+      .map((part) => Number.parseInt(part, 10) || 0)
+      .slice(0, 3);
+
+  const isNewer = (remote, local) => {
+    const a = parseVersion(remote);
+    const b = parseVersion(local);
+    for (let i = 0; i < 3; i += 1) {
+      if (a[i] !== b[i]) return a[i] > b[i];
+    }
+    return false;
+  };
+
+  const escapeHtml = (value) =>
+    String(value).replace(/[&<>"']/g, (char) => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#039;",
+    }[char]));
+
+  const showUpdateDialog = (release) => {
+    if (document.getElementById("mobile-update-dialog")) return;
+
+    const overlay = document.createElement("div");
+    overlay.id = "mobile-update-dialog";
+    overlay.innerHTML = `
+      <div style="position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.72);display:flex;align-items:center;justify-content:center;padding:22px;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+        <div style="width:min(430px,100%);background:#17181c;color:#fff;border:1px solid rgba(255,255,255,.1);border-radius:18px;padding:24px;box-shadow:0 20px 70px rgba(0,0,0,.5);">
+          <div style="font-size:12px;font-weight:800;letter-spacing:.12em;color:#9ca3af;margin-bottom:8px;">RESENHAZINHA</div>
+          <h2 style="margin:0 0 8px;font-size:22px;">Nova versão disponível</h2>
+          <p style="margin:0 0 20px;color:#b9bbc2;line-height:1.5;">
+            A versão <strong style="color:#fff;">${escapeHtml(release.version)}</strong> está disponível.
+            Você está usando a <strong style="color:#fff;">${MOBILE_VERSION}</strong>.
+          </p>
+          <div style="display:flex;gap:10px;">
+            <button id="mobile-update-later" style="flex:1;border:0;border-radius:10px;padding:12px;background:#292b31;color:#fff;font-weight:700;">Agora não</button>
+            <button id="mobile-update-now" style="flex:1;border:0;border-radius:10px;padding:12px;background:#5865f2;color:#fff;font-weight:700;">Atualizar</button>
+          </div>
+        </div>
+      </div>`;
+
+    document.body.appendChild(overlay);
+
+    overlay.querySelector("#mobile-update-later").addEventListener("click", () => overlay.remove());
+    overlay.querySelector("#mobile-update-now").addEventListener("click", () => {
+      const button = overlay.querySelector("#mobile-update-now");
+      button.disabled = true;
+      button.textContent = "Baixando...";
+      window.AndroidUpdater.installApk(release.apkUrl);
+    });
+  };
+
+  const checkForUpdate = async () => {
+    try {
+      const response = await fetch(
+        `https://api.github.com/repos/${REPO}/releases?per_page=20`,
+        { headers: { Accept: "application/vnd.github+json" }, cache: "no-store" }
+      );
+
+      if (!response.ok) return;
+
+      const releases = await response.json();
+      const release = releases
+        .filter((item) => !item.draft && !item.prerelease && /^mobile-v\d+\.\d+\.\d+$/i.test(item.tag_name))
+        .sort((a, b) => (isNewer(a.tag_name, b.tag_name) ? -1 : 1))[0];
+
+      if (!release || !isNewer(release.tag_name, MOBILE_VERSION)) return;
+
+      const apk = release.assets?.find((asset) => /.apk$/i.test(asset.name));
+      if (!apk?.browser_download_url) return;
+
+      showUpdateDialog({
+        version: release.tag_name.replace(/^mobile-/i, ""),
+        apkUrl: apk.browser_download_url,
+      });
+    } catch (error) {
+      console.debug("Atualização Android indisponível:", error);
+    }
+  };
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", () => setTimeout(checkForUpdate, 1800), { once: true });
+  } else {
+    setTimeout(checkForUpdate, 1800);
+  }
+})();
