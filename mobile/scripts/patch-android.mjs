@@ -123,10 +123,12 @@ public class MainActivity extends BridgeActivity {
 
     public static class AndroidUpdater {
         private final Context context;
+        private final MainActivity activity;
         private static final String REPO = "Yazzdyz/Resenhazinha-DC-2.0";
 
-        AndroidUpdater(Context context) {
-            this.context = context;
+        AndroidUpdater(MainActivity activity) {
+            this.activity = activity;
+            this.context = activity;
         }
 
         @JavascriptInterface
