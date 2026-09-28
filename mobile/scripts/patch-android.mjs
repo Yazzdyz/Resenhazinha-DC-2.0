@@ -92,7 +92,7 @@ if (!packageMatch) {
 
 const packageName = packageMatch[1];
 
-package ${packageName};
+const nativeCode = `package ${packageName};
 
 import android.app.AlertDialog;
 import android.content.Context;
@@ -437,6 +437,7 @@ public class MainActivity extends BridgeActivity {
     }
 }
 
+`;
 
 await writeFile(mainActivityPath, nativeCode);
 const appGradlePath = path.join(androidRoot, "app/build.gradle");
