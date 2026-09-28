@@ -3,13 +3,12 @@
   "appName": "Resenhazinha",
   "webDir": "../dist",
   "android": {
-    "allowMixedContent": false,
-    "adjustMarginsForEdgeToEdge": "force"
+    "allowMixedContent": false
   },
   "appendUserAgent": "ResenhazinhaMobile/1.0",
   "plugins": {
     "SystemBars": {
-      "insetsHandling": "native",
+      "insetsHandling": "css",
       "initialViewportFitValueHint": "cover",
       "style": "DARK",
       "hidden": false,
