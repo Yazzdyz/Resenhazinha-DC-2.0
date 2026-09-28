@@ -5,5 +5,13 @@
   "android": {
     "allowMixedContent": false
   },
-  "appendUserAgent": "ResenhazinhaMobile/1.0"
+  "appendUserAgent": "ResenhazinhaMobile/1.0",
+  "plugins": {
+    "SystemBars": {
+      "insetsHandling": "css",
+      "style": "DARK",
+      "hidden": false,
+      "animation": "NONE"
+    }
+  }
 }
