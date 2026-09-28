@@ -726,14 +726,6 @@ function playUiSound(kind, volume = 0.45) {
   if (state.microphoneTest?.silencingPlayback) return;
   unlockUiAudio();
 
-  // No Android/iOS o som local não depende de hotlink externo nem de uma
-  // reprodução atrasada por uma cadeia de awaits. O desktop mantém os sons
-  // originais do arquivo remoto.
-  if (isMobileRuntime()) {
-    fallbackUiSound(kind, volume);
-    return;
-  }
-
   const base = uiSoundElement(kind);
   if (!base) {
     fallbackUiSound(kind, volume);
