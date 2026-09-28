@@ -235,14 +235,14 @@ public class MainActivity extends BridgeActivity {
             String current = org.json.JSONObject.quote(currentVersion == null ? "" : currentVersion);
             String latest = org.json.JSONObject.quote(latestVersion == null ? "" : latestVersion);
             String script = "window.__resenhazinhaUpdateResult && window.__resenhazinhaUpdateResult({ok:" + ok + ",updateAvailable:" + updateAvailable + ",currentVersion:" + current + ",latestVersion:" + latest + "})";
-            getBridge().getWebView().post(() -> getBridge().getWebView().evaluateJavascript(script, null));
+            activity.getBridge().getWebView().post(() -> activity.getBridge().getWebView().evaluateJavascript(script, null));
         }
 
         private void showUpdateDialogNative(String version, String apkUrl) {
             String v = org.json.JSONObject.quote(version);
             String u = org.json.JSONObject.quote(apkUrl);
             String script = "window.__resenhazinhaShowUpdateDialog && window.__resenhazinhaShowUpdateDialog(" + v + "," + u + ")";
-            getBridge().getWebView().post(() -> getBridge().getWebView().evaluateJavascript(script, null));
+            activity.getBridge().getWebView().post(() -> activity.getBridge().getWebView().evaluateJavascript(script, null));
         }
 
         private void downloadAndInstall(String apkUrl) {
