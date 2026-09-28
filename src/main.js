@@ -50,19 +50,29 @@ const MEDIA_NEGOTIATION_TIMEOUT_MS = 30_000;
 const CONNECTION_HEARTBEAT_MS = 12000;
 const CONNECTION_GRACE_MS = 30000;
 const MAX_SERVER_ROLES = 20;
+const mobileSoundUrl = (file) => {
+  try {
+    // No Capacitor usamos o baseURI da aplicação para não depender de
+    // caminhos absolutos do host. Isso evita o WebView procurar /sounds
+    // no lugar errado quando o app usa base "./".
+    return new URL(`sounds/discord/${file}`, document.baseURI).href;
+  } catch (_error) {
+    return `sounds/discord/${file}`;
+  }
+};
+
 const UI_SOUND_URLS = isMobileRuntime()
   ? {
-      // Arquivos locais do arquivo público de sons do Discord (dez/2025).
-      // O mobile não depende de sites externos para os sons.
-      message: "/sounds/discord/message1.mp3",
-      voiceJoin: "/sounds/discord/user_join.mp3",
-      voiceLeave: "/sounds/discord/disconnect.mp3",
-      screenStart: "/sounds/discord/stream_started.mp3",
-      screenStop: "/sounds/discord/stream_ended.mp3",
-      micMute: "/sounds/discord/mute.mp3",
-      micUnmute: "/sounds/discord/unmute.mp3",
-      deafen: "/sounds/discord/deafen.mp3",
-      undeafen: "/sounds/discord/undeafen.mp3",
+      // Sons locais: mesmos arquivos usados pela interface, sem CDN externo.
+      message: mobileSoundUrl("message1.mp3"),
+      voiceJoin: mobileSoundUrl("user_join.mp3"),
+      voiceLeave: mobileSoundUrl("disconnect.mp3"),
+      screenStart: mobileSoundUrl("stream_started.mp3"),
+      screenStop: mobileSoundUrl("stream_ended.mp3"),
+      micMute: mobileSoundUrl("mute.mp3"),
+      micUnmute: mobileSoundUrl("unmute.mp3"),
+      deafen: mobileSoundUrl("deafen.mp3"),
+      undeafen: mobileSoundUrl("undeafen.mp3"),
     }
   : {
       // Mantém o comportamento e os sons já usados no PC.
@@ -771,6 +781,9 @@ function playUiSound(kind, volume = 0.45) {
 
   const base = uiSoundElement(kind);
   if (!base) {
+    // No mobile não sintetizamos um som diferente do arquivo original.
+    // Se o arquivo local não estiver disponível, simplesmente não tocamos nada.
+    if (isMobileRuntime()) return;
     fallbackUiSound(kind, volume);
     return;
   }
@@ -779,9 +792,13 @@ function playUiSound(kind, volume = 0.45) {
     const audio = base.cloneNode(true);
     audio.volume = clampVolume(volume);
     const playback = audio.play();
-    if (playback?.catch) playback.catch(() => fallbackUiSound(kind, volume));
+    if (playback?.catch) {
+      playback.catch(() => {
+        if (!isMobileRuntime()) fallbackUiSound(kind, volume);
+      });
+    }
   } catch (_error) {
-    fallbackUiSound(kind, volume);
+    if (!isMobileRuntime()) fallbackUiSound(kind, volume);
   }
 }
 
@@ -845,8 +862,10 @@ function startSpeakingDetector(peerId, stream) {
   try {
     const source = context.createMediaStreamSource(stream);
     const analyser = context.createAnalyser();
-    analyser.fftSize = 512;
-    analyser.smoothingTimeConstant = 0.58;
+    // O detector é só visual; no mobile usamos uma amostragem mais leve
+    // para não disputar CPU com WebRTC, animações e rolagem.
+    analyser.fftSize = isMobileRuntime() ? 256 : 512;
+    analyser.smoothingTimeConstant = isMobileRuntime() ? 0.62 : 0.58;
     source.connect(analyser);
     const samples = new Uint8Array(analyser.fftSize);
     const detector = {
@@ -864,7 +883,7 @@ function startSpeakingDetector(peerId, stream) {
     const scheduleNext = (tick) => {
       if (isMobileRuntime()) {
         detector.frameMode = "timeout";
-        detector.frame = window.setTimeout(tick, 90);
+        detector.frame = window.setTimeout(tick, 120);
       } else {
         detector.frameMode = "raf";
         detector.frame = requestAnimationFrame(tick);
