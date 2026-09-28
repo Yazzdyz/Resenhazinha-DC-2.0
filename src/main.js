@@ -443,7 +443,10 @@ if (serverActionNoticeV306) {
 
 profileReady.then(() => {
   if (state.serverBinding && cleanNickname(elements.nicknameInput.value)) {
-    window.setTimeout(() => enterRoom(state.serverBinding.isOwner ? "resume-host" : "resume-join"), 120);
+    window.setTimeout(() => {
+      const resumeMode = state.serverBinding.isOwner && !isMobileRuntime() ? "resume-host" : "resume-join";
+      enterRoom(resumeMode);
+    }, 120);
   }
 });
 
@@ -1202,7 +1205,7 @@ function loadServerBinding() {
     const raw = JSON.parse(localStorage.getItem(SERVER_BINDING_KEY) || "null");
     const roomCode = normalizeRoomCode(raw?.roomCode || "");
     if (roomCode.length < 4) return null;
-    const isOwner = Boolean(raw?.isOwner);
+    const isOwner = Boolean(raw?.isOwner) && !isMobileRuntime();
     return {
       roomCode,
       inviteToken: normalizeInviteToken(raw?.inviteToken || ""),
@@ -1219,7 +1222,7 @@ function loadServerBinding() {
 function saveServerBinding(binding) {
   const roomCode = normalizeRoomCode(binding?.roomCode || "");
   if (roomCode.length < 4) return;
-  const isOwner = Boolean(binding?.isOwner);
+  const isOwner = Boolean(binding?.isOwner) && !isMobileRuntime();
   state.serverBinding = {
     roomCode,
     inviteToken: normalizeInviteToken(binding?.inviteToken || state.server?.inviteToken || ""),
@@ -2592,7 +2595,9 @@ async function enterRoom(mode) {
   state.nickname = nickname;
   state.roomCode = roomCode;
   state.joinInviteToken = parsedJoin.inviteToken;
-  state.isHost = mode === "create" || mode === "resume-host";
+  // O Android/iOS entra sempre como cliente do servidor Cloudflare.
+  // O PC continua podendo criar/administrar o servidor normalmente.
+  state.isHost = !isMobileRuntime() && (mode === "create" || mode === "resume-host");
   state.cloudReady = false;
   state.cloudOwnerKey = state.isHost ? getOrCreateCloudOwnerKey() : "";
   state.inVoice = false;
