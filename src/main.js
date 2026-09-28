@@ -5130,25 +5130,58 @@ function isChatNearBottom(container = elements.chatMessages, threshold = 90) {
   return container.scrollHeight - container.scrollTop - container.clientHeight <= threshold;
 }
 
-function restoreChatScroll(container, scrollTop, scrollHeight, wasNearBottom = false) {
-  if (!container) return;
+function captureChatScrollPosition(container = elements.chatMessages) {
+  if (!container) return { nearBottom: true, anchorId: "", anchorOffset: 0 };
+
+  const containerRect = container.getBoundingClientRect();
+  const messages = [...container.querySelectorAll(".chat-message[data-message-id]")];
+  const visible = messages.find((node) => {
+    const rect = node.getBoundingClientRect();
+    return rect.bottom > containerRect.top + 1;
+  }) || messages.at(-1);
+
+  return {
+    nearBottom: isChatNearBottom(container),
+    anchorId: visible?.dataset?.messageId || "",
+    anchorOffset: visible
+      ? visible.getBoundingClientRect().top - containerRect.top
+      : 0,
+  };
+}
+
+function restoreChatScrollPosition(container = elements.chatMessages, position = null) {
+  if (!container || !position) return;
+
   const apply = () => {
-    if (wasNearBottom) {
+    if (position.nearBottom) {
       container.scrollTop = container.scrollHeight;
       return;
     }
-    const heightDelta = Math.max(0, container.scrollHeight - scrollHeight);
-    container.scrollTop = Math.max(0, scrollTop + heightDelta);
+
+    if (!position.anchorId) {
+      container.scrollTop = 0;
+      return;
+    }
+
+    const anchor = container.querySelector(
+      `[data-message-id="${CSS.escape(position.anchorId)}"]`,
+    );
+
+    if (!anchor) return;
+
+    const containerRect = container.getBoundingClientRect();
+    const currentOffset = anchor.getBoundingClientRect().top - containerRect.top;
+    container.scrollTop += currentOffset - position.anchorOffset;
   };
+
   apply();
   window.requestAnimationFrame(apply);
 }
 
 function appendChatMessage(message) {
   if (state.chatMessages.some((item) => item.id === message.id)) return;
-  const wasNearBottom = isChatNearBottom();
-  const previousScrollTop = elements.chatMessages?.scrollTop || 0;
-  const previousScrollHeight = elements.chatMessages?.scrollHeight || 0;
+
+  const scrollPosition = captureChatScrollPosition();
   const previousMessage = state.chatMessages.at(-1) || null;
 
   state.chatMessages.push(message);
@@ -5165,7 +5198,7 @@ function appendChatMessage(message) {
   if (incoming && !doNotDisturb) playUiSound("message", mentioned ? 0.58 : 0.42);
 
   renderChatMessage(message, previousMessage);
-  restoreChatScroll(elements.chatMessages, previousScrollTop, previousScrollHeight, wasNearBottom);
+  restoreChatScrollPosition(elements.chatMessages, scrollPosition);
 
   if (mentioned && !doNotDisturb) toast(`${message.name} mencionou você.`);
   if (incoming && notActivelyReading) {
@@ -5194,13 +5227,8 @@ function renderChatHistory() {
   const container = elements.chatMessages;
   if (!container) return;
 
-  const hadRenderedMessages = container.querySelector(".chat-message") !== null;
-  const previousScrollTop = container.scrollTop;
-  const previousScrollHeight = container.scrollHeight;
-  const wasNearBottom = isChatNearBottom(container);
-
-  container.querySelectorAll(".chat-message").forEach((item) => item.remove());
-  container.scrollTop = previousScrollTop;
+  const hadRenderedMessages = container.querySelector(".chat-message[data-message-id]") !== null;
+  const scrollPosition = captureChatScrollPosition(container);
 
   container.querySelectorAll(".chat-message").forEach((item) => item.remove());
   elements.chatEmpty.hidden = state.chatMessages.length > 0;
@@ -5214,7 +5242,7 @@ function renderChatHistory() {
     return;
   }
 
-  restoreChatScroll(container, previousScrollTop, previousScrollHeight, wasNearBottom);
+  restoreChatScrollPosition(container, scrollPosition);
 }
 
 function renderChatMessage(message, previousMessage = null) {
