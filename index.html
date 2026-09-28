@@ -170,7 +170,21 @@
           </div>
         </aside>
 
+        <div class="mobile-drawer-scrim" id="mobile-drawer-scrim" hidden></div>
+
         <main class="server-content">
+          <div class="mobile-topbar">
+            <button class="mobile-topbar-button" id="mobile-server-button" type="button" aria-label="Abrir canais" title="Canais">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16H5z"/><path d="M9 9h6M9 13h6M9 17h3"/></svg>
+            </button>
+            <div class="mobile-topbar-title">
+              <span id="mobile-topbar-kind">CANAL DE TEXTO</span>
+              <strong id="mobile-topbar-channel">chat-principal</strong>
+            </div>
+            <button class="mobile-topbar-button" id="mobile-members-button" type="button" aria-label="Abrir membros" title="Membros">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 20v-1.5a4.5 4.5 0 0 0-4.5-4.5h-1A4.5 4.5 0 0 0 6 18.5V20M11 10.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7ZM18 11a3 3 0 0 0 0-6M18 14.5a3.5 3.5 0 0 1 3 3.5V20"/></svg>
+            </button>
+          </div>
           <header class="content-header">
             <div class="content-title">
               <span class="content-channel-icon" id="content-channel-icon">#</span>
