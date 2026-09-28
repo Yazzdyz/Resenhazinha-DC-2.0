@@ -468,10 +468,34 @@ if (!defaultConfigNeedle.test(appGradle)) {
 }
 
 appGradle = appGradle.replace(
-  defaultConfigNeedle,
-  `defaultConfig {
-        versionCode ${mobileVersionCode}
+  /versionCode\s+[^\n]+/g,
+  `versionCode ${mobileVersionCode}`,
+);
+
+appGradle = appGradle.replace(
+  /versionName\s+["'][^"']*["']/g,
+  `versionName "${mobileVersion}"`,
+);
+
+if (!/versionCode\s+\d+/.test(appGradle)) {
+  appGradle = appGradle.replace(
+    defaultConfigNeedle,
+    `defaultConfig {
+        versionCode ${mobileVersionCode}`,
+  );
+}
+
+if (!/versionName\s+["'][^"']+["']/.test(appGradle)) {
+  appGradle = appGradle.replace(
+    defaultConfigNeedle,
+    `defaultConfig {
         versionName "${mobileVersion}"`,
+  );
+}
+
+appGradle = appGradle.replace(
+  /versionName\s+["'][^"']*["']/,
+  `versionName "${mobileVersion}"`,
 );
 
 if (!appGradle.includes("signingConfigs {")) {
