@@ -1,7 +1,7 @@
 {
   "name": "resenhazinha-mobile",
   "private": true,
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Shell Android do Resenhazinha usando a mesma aplicação web.",
   "scripts": {
     "android:add": "cap add android",
