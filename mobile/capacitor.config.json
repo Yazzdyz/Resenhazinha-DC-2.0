@@ -8,7 +8,7 @@
   "appendUserAgent": "ResenhazinhaMobile/1.0",
   "plugins": {
     "SystemBars": {
-      "insetsHandling": "css",
+      "insetsHandling": "native",
       "initialViewportFitValueHint": "cover",
       "style": "DARK",
       "hidden": false,
