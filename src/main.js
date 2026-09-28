@@ -5069,7 +5069,7 @@ function ensureValidView() {
 }
 function switchView(view) {
   if (view === "text" && !state.server.textChannel.exists) return; if (view === "voice" && !state.server.voiceChannel.exists) return;
-  state.currentView = view;
+  state.currentView = view; closeMobileDrawers();
   closeMobileDrawers();
   if (view === "text") { state.unreadMessages = 0; state.unreadMentions = 0; }
   renderServerUI();
