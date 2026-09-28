@@ -1,5 +1,5 @@
 (() => {
-  const MOBILE_VERSION = "1.0.7";
+  const MOBILE_VERSION = "1.0.8";
   const REPO = "Yazzdyz/Resenhazinha-DC-2.0";
 
   const isAndroidApp = () => {
@@ -111,6 +111,7 @@
 
   const checkForUpdate = async () => {
     if (!isAndroidApp()) return;
+    if (hasNativeUpdater()) return;
 
     try {
       const response = await fetch(
