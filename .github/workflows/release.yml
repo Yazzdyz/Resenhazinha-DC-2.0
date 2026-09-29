@@ -1,5 +1,6 @@
 name: Publicar versão
 # Publicação oficial das correções de call e do cliente mobile.
+# O workflow também recompõe os metadados do electron-updater no release.
 
 on:
   push:
