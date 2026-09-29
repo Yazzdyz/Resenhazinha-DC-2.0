@@ -1,3 +1,9 @@
+## v5.2.2
+
+- Corrige a estabilidade da assinatura de áudio no Cloudflare Realtime SFU.
+- Evita reset completo da geração de voz durante cleanup de tracks.
+- Adiciona tentativas controladas quando a publicação remota ainda não está disponível.
+
 # Histórico de versões
 
 As mudanças mais importantes do Resenhazinha são registradas aqui. Para baixar o aplicativo, use sempre a [versão mais recente](https://github.com/Yazzdyz/Resenhazinha-DC-2.0/releases/latest).
