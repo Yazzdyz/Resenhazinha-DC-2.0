@@ -245,10 +245,30 @@ export class VoiceSfuManager {
 
   async _syncTargets(targets) {
     if (!this.active || !this.consumer) return;
-    const response = await this._request("subscribe", {
-      generation: this.generation,
-      desiredClientIds: targets.map((item) => item.clientId),
-    });
+    let response;
+    let lastSubscribeError = null;
+    const subscribeRetryDelays = [0, 250, 700, 1400];
+    for (let attempt = 0; attempt < subscribeRetryDelays.length; attempt += 1) {
+      if (subscribeRetryDelays[attempt] > 0) await wait(subscribeRetryDelays[attempt]);
+      try {
+        response = await this._request("subscribe", {
+          generation: this.generation,
+          desiredClientIds: targets.map((item) => item.clientId),
+        });
+        lastSubscribeError = null;
+        break;
+      } catch (error) {
+        lastSubscribeError = error;
+        const code = String(error?.code || "");
+        const retryableSubscription = [
+          "voice_sfu_subscription_mid_missing",
+          "not_found_track_error",
+          "empty_track_error",
+        ].includes(code);
+        if (!retryableSubscription || attempt === subscribeRetryDelays.length - 1) throw error;
+      }
+    }
+    if (!response) throw lastSubscribeError || new Error("voice-sfu-subscribe-empty-response");
 
     const nextByMid = new Map();
     const nextByClient = new Map();
@@ -282,6 +302,12 @@ export class VoiceSfuManager {
         generation: this.generation,
         mutationId: response.mutationId,
         sessionDescription: sessionDescription(this.consumer.localDescription, "answer"),
+      });
+      this.syncRequested = true;
+      queueMicrotask(() => {
+        if (this.intentActive && this.configured === true && this.active) {
+          void this.syncParticipants(this.getMembers?.() || []);
+        }
       });
     }
   }
