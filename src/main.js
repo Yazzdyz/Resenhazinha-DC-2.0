@@ -187,6 +187,7 @@ const state = {
   appFontScale: DEFAULT_FONT_SCALE,
   appTheme: DEFAULT_THEME,
   presenceStatus: DEFAULT_PRESENCE,
+  closeToTray: false,
   voiceActivityContext: null,
   speakingDetectors: new Map(),
   speakingPeers: new Set(),
@@ -1157,7 +1158,7 @@ function loadFallbackProfileState() {
 }
 
 async function persistProfileTextState() {
-  const payload = { bio: cleanBio(state.profileBio), backgroundBlur: normalizeBackgroundBlur(state.appBackgroundBlur), backgroundZoom: normalizeBackgroundZoom(state.appBackgroundZoom), fontScale: normalizeFontScale(state.appFontScale), theme: normalizeTheme(state.appTheme), presence: normalizePresence(state.presenceStatus) };
+  const payload = { bio: cleanBio(state.profileBio), backgroundBlur: normalizeBackgroundBlur(state.appBackgroundBlur), backgroundZoom: normalizeBackgroundZoom(state.appBackgroundZoom), fontScale: normalizeFontScale(state.appFontScale), theme: normalizeTheme(state.appTheme), presence: normalizePresence(state.presenceStatus), closeToTray: Boolean(state.closeToTray) };
   try {
     if (window.resenhazinhaDesktop?.saveProfileText) await window.resenhazinhaDesktop.saveProfileText(payload);
   } catch (_error) {
@@ -2014,6 +2015,7 @@ async function loadStoredProfile() {
     state.appFontScale = normalizeFontScale(profile?.fontScale ?? fallback.fontScale ?? DEFAULT_FONT_SCALE);
     state.appTheme = normalizeTheme(profile?.theme ?? fallback.theme ?? DEFAULT_THEME);
     state.presenceStatus = normalizePresence(profile?.presence ?? fallback.presence ?? DEFAULT_PRESENCE);
+    state.closeToTray = Boolean(profile?.closeToTray ?? fallback.closeToTray ?? false);
   } catch (_error) {
     state.avatarData = isMobileRuntime() ? sanitizeAvatar(await mobileProfileMediaGet("avatar")) : null;
     state.bannerData = sanitizeProfileBanner(fallback.banner) || (isMobileRuntime() ? sanitizeProfileBanner(await mobileProfileMediaGet("banner")) : null);
@@ -2024,6 +2026,7 @@ async function loadStoredProfile() {
     state.appFontScale = normalizeFontScale(fallback.fontScale ?? DEFAULT_FONT_SCALE);
     state.appTheme = normalizeTheme(fallback.theme ?? DEFAULT_THEME);
     state.presenceStatus = normalizePresence(fallback.presence ?? DEFAULT_PRESENCE);
+    state.closeToTray = Boolean(fallback.closeToTray ?? false);
   }
   renderLocalAvatars();
   applyUiTheme();
@@ -3910,6 +3913,8 @@ function renderUserSettings() {
   const name = state.nickname || cleanNickname(elements.nicknameInput.value) || "Você";
   elements.userNameSettings.value = name;
   elements.userBioSettings.value = cleanBio(state.profileBio);
+  if (elements.closeToTraySetting) elements.closeToTraySetting.hidden = isMobileRuntime();
+  if (elements.closeToTrayToggle) elements.closeToTrayToggle.checked = !isMobileRuntime() && Boolean(state.closeToTray);
   renderPresenceChoices();
   applyBannerSurface(elements.userBannerPreview, state.bannerData, memberDisplayRole(currentSelfMember())?.color || "#6f6b9b");
   paintAvatar(elements.userAvatarPreview, name, state.avatarData);
@@ -4164,6 +4169,7 @@ async function saveUserSettings() {
   state.appFontScale = normalizeFontScale(elements.appFontScaleRange.value);
   state.appTheme = normalizeTheme(state.appTheme);
   state.presenceStatus = normalizePresence(state.presenceStatus);
+  state.closeToTray = !isMobileRuntime() && Boolean(elements.closeToTrayToggle?.checked);
   localStorage.setItem(MIC_DEVICE_KEY, state.microphoneDeviceId);
   localStorage.setItem(SPEAKER_DEVICE_KEY, state.speakerDeviceId);
   localStorage.setItem(MIC_INPUT_VOLUME_KEY, String(state.microphoneInputVolume));
