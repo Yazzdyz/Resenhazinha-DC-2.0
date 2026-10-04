@@ -1,3 +1,9 @@
+## v5.2.8
+
+- Mantém apenas a supressão de ruído padrão do Chromium/WebRTC.
+- Remove do caminho do microfone qualquer noise gate, filtro extra ou voice isolation do Resenhazinha.
+- Publica a faixa do microfone diretamente pelo WebRTC quando o ganho está em 100%.
+
 ## v5.2.7
 
 - Remove a supressão de ruído e o voice isolation personalizados do microfone.
