@@ -164,7 +164,7 @@ const state = {
   memberAudioNodes: new Map(),
   screenAudioNodes: new Map(),
   microphoneTest: null,
-  noiseSuppressionLevel: normalizeNoiseSuppressionLevel(localStorage.getItem(NOISE_SUPPRESSION_KEY) || "standard"),
+  noiseSuppressionLevel: "off",
   screenStream: null,
   screenSources: [],
   screenSourceFilter: "all",
@@ -3930,7 +3930,8 @@ function renderUserSettings() {
   renderAppearanceValues();
   renderThemeChoices();
   renderAppBackgroundPreview();
-  elements.noiseSuppressionSelect.value = normalizeNoiseSuppressionLevel(state.noiseSuppressionLevel);
+  elements.noiseSuppressionSelect.value = "off";
+  elements.noiseSuppressionSelect.disabled = true;
   elements.microphoneInputVolumeRange.value = String(Math.round(state.microphoneInputVolume * 100));
   elements.outputVolumeRange.value = String(Math.round(state.outputVolume * 100));
   elements.speakerDeviceSelect.value = [...elements.speakerDeviceSelect.options].some((option) => option.value === state.speakerDeviceId) ? state.speakerDeviceId : "";
@@ -6148,88 +6149,91 @@ function applyLocalAudioState() {
   });
 }
 
-function microphoneAudioConstraints(deviceId = state.microphoneDeviceId, level = state.noiseSuppressionLevel) {
-  const normalizedLevel = normalizeNoiseSuppressionLevel(level);
+function microphoneAudioConstraints(deviceId = state.microphoneDeviceId) {
   const supported = navigator.mediaDevices.getSupportedConstraints();
   const constraints = {
+    // Keep the communication DSP supplied by Chromium/WebRTC, but do not
+    // enable our own noise suppression or voice-isolation processing.
     echoCancellation: true,
-    noiseSuppression: normalizedLevel !== "off",
-    autoGainControl: normalizedLevel !== "off",
+    noiseSuppression: false,
+    autoGainControl: true,
     channelCount: { ideal: 1 },
     sampleRate: { ideal: 48_000 },
     sampleSize: { ideal: 16 },
   };
+  if (supported.latency) constraints.latency = { ideal: 0.01 };
   if (deviceId) constraints.deviceId = { exact: deviceId };
-  if (supported.voiceIsolation && normalizedLevel === "high") constraints.voiceIsolation = true;
   return constraints;
 }
 
-async function createMicrophoneCapture(deviceId = state.microphoneDeviceId, levelOverride = state.noiseSuppressionLevel, inputVolumeOverride = state.microphoneInputVolume) {
+async function createMicrophoneCapture(deviceId = state.microphoneDeviceId, _levelOverride = "off", inputVolumeOverride = state.microphoneInputVolume) {
   const requestedDevice = String(deviceId || "");
-  const level = normalizeNoiseSuppressionLevel(levelOverride);
   let rawStream;
   try {
-    rawStream = await navigator.mediaDevices.getUserMedia({ audio: microphoneAudioConstraints(requestedDevice, level), video: false });
+    rawStream = await navigator.mediaDevices.getUserMedia({
+      audio: microphoneAudioConstraints(requestedDevice),
+      video: false,
+    });
   } catch (error) {
     if (requestedDevice && ["NotFoundError", "OverconstrainedError"].includes(error?.name)) {
-      rawStream = await navigator.mediaDevices.getUserMedia({ audio: microphoneAudioConstraints("", level), video: false });
+      rawStream = await navigator.mediaDevices.getUserMedia({
+        audio: microphoneAudioConstraints(""),
+        video: false,
+      });
     } else throw error;
   }
 
-  if (!window.AudioContext) return { stream: rawStream, rawStream, audioContext: null, gainNode: null, processing: level === "off" ? "off" : "native" };
+  const inputVolume = normalizeMicInputVolume(inputVolumeOverride);
 
+  // At the normal 100% input level we publish the original browser track
+  // directly. This avoids an unnecessary WebAudio resample/processing stage.
+  if (inputVolume === 1 || !window.AudioContext) {
+    const track = rawStream.getAudioTracks()[0];
+    if (track) track.contentHint = "speech";
+    return {
+      stream: rawStream,
+      rawStream,
+      audioContext: null,
+      gainNode: null,
+      processing: "browser-webrtc",
+    };
+  }
+
+  // Keep the existing local input-volume control without changing the default
+  // audio path. Only users who intentionally choose a value other than 100%
+  // get a WebAudio gain stage.
   let context = null;
   try {
     context = new AudioContext({ sampleRate: 48_000, latencyHint: "interactive" });
     await context.resume();
     const source = context.createMediaStreamSource(rawStream);
-    let tail = source;
-    let processing = level === "off" ? "off" : "native-standard";
-
-    // O preset Padrão fica propositalmente no DSP nativo do Chromium/WebRTC.
-    // Isso evita o efeito "porta fechando" do noise gate em finais de palavras
-    // e mantém a voz mais natural, como o uso Standard esperado em apps de voz.
-    if (level === "high") {
-      try {
-        await context.audioWorklet.addModule("./mic-noise-worklet.js");
-        const highpass = context.createBiquadFilter();
-        highpass.type = "highpass";
-        highpass.frequency.value = 110;
-        highpass.Q.value = 0.7;
-        const lowpass = context.createBiquadFilter();
-        lowpass.type = "lowpass";
-        lowpass.frequency.value = 7600;
-        lowpass.Q.value = 0.5;
-        const gate = new AudioWorkletNode(context, "resenhazinha-noise-gate", { processorOptions: { level: "high" } });
-        const compressor = context.createDynamicsCompressor();
-        compressor.threshold.value = -34;
-        compressor.knee.value = 14;
-        compressor.ratio.value = 3.5;
-        compressor.attack.value = 0.004;
-        compressor.release.value = 0.2;
-        source.connect(highpass).connect(lowpass).connect(gate).connect(compressor);
-        tail = compressor;
-        processing = "native+adaptive-high";
-      } catch (workletError) {
-        console.warn("[Resenhazinha] Filtro extra de ruído indisponível; usando supressão nativa.", workletError);
-        processing = "native-standard-fallback";
-      }
-    }
-
     const gainNode = context.createGain();
-    gainNode.gain.value = normalizeMicInputVolume(inputVolumeOverride);
+    gainNode.gain.value = inputVolume;
     const destination = context.createMediaStreamDestination();
-    tail.connect(gainNode).connect(destination);
+    source.connect(gainNode).connect(destination);
     const processedTrack = destination.stream.getAudioTracks()[0];
-    processedTrack.contentHint = "speech";
-    return { stream: new MediaStream([processedTrack]), rawStream, audioContext: context, gainNode, processing };
+    if (processedTrack) processedTrack.contentHint = "speech";
+    return {
+      stream: new MediaStream(processedTrack ? [processedTrack] : rawStream.getAudioTracks()),
+      rawStream,
+      audioContext: context,
+      gainNode,
+      processing: "browser-webrtc+input-gain",
+    };
   } catch (error) {
-    console.warn("[Resenhazinha] Pipeline de microfone caiu para captura direta.", error);
+    console.warn("[Resenhazinha] Gain stage unavailable; publishing the original microphone track.", error);
     context?.close?.().catch?.(() => undefined);
-    return { stream: rawStream, rawStream, audioContext: null, gainNode: null, processing: level === "off" ? "off" : "native-fallback" };
+    const track = rawStream.getAudioTracks()[0];
+    if (track) track.contentHint = "speech";
+    return {
+      stream: rawStream,
+      rawStream,
+      audioContext: null,
+      gainNode: null,
+      processing: "browser-webrtc-fallback",
+    };
   }
 }
-
 function stopMicrophoneCapture(capture = null) {
   const stream = capture ? capture.stream : state.localStream;
   const rawStream = capture ? capture.rawStream : state.rawMicrophoneStream;
