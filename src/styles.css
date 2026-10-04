@@ -2782,6 +2782,11 @@ textarea:focus-visible {
 .settings-section h3 small { margin-left: 5px; color: #626269; font-size: 9px; font-weight: 600; }
 .settings-section-title p { margin: 4px 0 0; color: #707077; font-size: 10px; }
 .settings-field { display: grid; gap: 6px; }
+.settings-toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 11px 12px; border: 1px solid #2a2a2d; border-radius: 9px; background: #0b0b0c; cursor: pointer; }
+.settings-toggle-row > span { display: grid; gap: 4px; min-width: 0; }
+.settings-toggle-row strong { color: #d9d9dd; font-size: 11px; }
+.settings-toggle-row small { color: #707077; font-size: 9px; line-height: 1.45; font-weight: 600; }
+.settings-toggle-row input[type="checkbox"] { width: 16px; height: 16px; flex: 0 0 auto; accent-color: #e7e7e9; cursor: pointer; }
 .settings-field span { color: #797980; font-size: 10px; font-weight: 700; }
 .settings-field input, .channel-setting-row input:not([type]), .role-setting-row input:not([type]), .role-create-row input:not([type]) { min-width: 0; height: 36px; border: 1px solid #2e2e31; border-radius: 7px; background: #070708; padding: 0 9px; color: #e6e6e8; outline: none; }
 .settings-field input:focus, .channel-setting-row input:focus, .role-setting-row input:focus, .role-create-row input:focus { border-color: #55555a; }
