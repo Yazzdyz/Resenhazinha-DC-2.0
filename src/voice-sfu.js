@@ -37,7 +37,7 @@ function sessionDescription(value, type) {
 function createPeerConnection() {
   return new RTCPeerConnection({
     bundlePolicy: "max-bundle",
-    iceCandidatePoolSize: 2,
+    iceCandidatePoolSize: 4,
     iceServers: [{ urls: "stun:stun.cloudflare.com:3478" }],
   });
 }
@@ -223,6 +223,13 @@ export class VoiceSfuManager {
     this.generation = Number(join.generation) || 0;
     if (!this.generation) throw new Error("voice-sfu-generation-missing");
 
+    // O receiving path não precisa esperar nossa própria publicação.
+    // A sessão consumidora já existe e pode negociar o áudio dos participantes
+    // que já estão publicados enquanto a sessão produtora termina o publish.
+    // Isso remove o waterfall "publish -> subscribe -> renegotiate" da entrada.
+    this.active = true;
+    void this.syncParticipants(this.getMembers?.() || [], true);
+
     const published = await this._request("publish", {
       generation: this.generation,
       mid: preparedOffer.mid,
@@ -237,10 +244,9 @@ export class VoiceSfuManager {
     this._emitState("connected", { generation: this.generation });
     this._startStats();
 
-    // Não bloqueia a conexão local esperando a assinatura dos outros participantes.
-    // A publicação já está ativa; a assinatura do áudio remoto continua imediatamente
-    // em paralelo e o track remoto será anexado assim que a renegociação terminar.
-    void this.syncParticipants(this.getMembers?.() || [], true);
+    // A assinatura já pode estar em andamento desde o momento em que a sessão
+    // recebeu sua generation. Forçamos uma reconciliação depois do publish para
+    // capturar quem entrou/publicou durante a nossa própria negociação.
   }
 
   async syncParticipants(members, force = false) {
