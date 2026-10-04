@@ -164,7 +164,7 @@ const state = {
   memberAudioNodes: new Map(),
   screenAudioNodes: new Map(),
   microphoneTest: null,
-  noiseSuppressionLevel: "off",
+  noiseSuppressionLevel: "standard",
   screenStream: null,
   screenSources: [],
   screenSourceFilter: "all",
@@ -3930,7 +3930,7 @@ function renderUserSettings() {
   renderAppearanceValues();
   renderThemeChoices();
   renderAppBackgroundPreview();
-  elements.noiseSuppressionSelect.value = "off";
+  elements.noiseSuppressionSelect.value = "standard";
   elements.noiseSuppressionSelect.disabled = true;
   elements.microphoneInputVolumeRange.value = String(Math.round(state.microphoneInputVolume * 100));
   elements.outputVolumeRange.value = String(Math.round(state.outputVolume * 100));
@@ -3940,13 +3940,7 @@ function renderUserSettings() {
 }
 
 function renderNoiseSuppressionNote() {
-  const level = normalizeNoiseSuppressionLevel(elements.noiseSuppressionSelect.value);
-  const notes = {
-    off: "Desligada: sem supressão de ruído e sem ganho automático. O cancelamento de eco continua ativo.",
-    standard: "Padrão: processamento nativo do Chromium/WebRTC, com cancelamento de eco, redução de ruído e ganho automático. Prioriza uma voz natural.",
-    high: "Alta: adiciona filtro e gate adaptativo ao processamento nativo para ambientes mais barulhentos. Pode cortar fala muito baixa.",
-  };
-  elements.noiseLevelNote.textContent = notes[level];
+  elements.noiseLevelNote.textContent = "Padrão: redução de ruído leve do Chromium/WebRTC + cancelamento de eco e ganho automático. Sem filtro, gate ou voice isolation extra do Resenhazinha.";
 }
 
 function normalizeMicInputVolume(value) {
@@ -6152,10 +6146,10 @@ function applyLocalAudioState() {
 function microphoneAudioConstraints(deviceId = state.microphoneDeviceId) {
   const supported = navigator.mediaDevices.getSupportedConstraints();
   const constraints = {
-    // Keep the communication DSP supplied by Chromium/WebRTC, but do not
-    // enable our own noise suppression or voice-isolation processing.
+    // Discord-like communication baseline: let Chromium/WebRTC handle the
+    // light microphone cleanup instead of adding our own DSP/gate.
     echoCancellation: true,
-    noiseSuppression: false,
+    noiseSuppression: true,
     autoGainControl: true,
     channelCount: { ideal: 1 },
     sampleRate: { ideal: 48_000 },
@@ -6166,7 +6160,7 @@ function microphoneAudioConstraints(deviceId = state.microphoneDeviceId) {
   return constraints;
 }
 
-async function createMicrophoneCapture(deviceId = state.microphoneDeviceId, _levelOverride = "off", inputVolumeOverride = state.microphoneInputVolume) {
+async function createMicrophoneCapture(deviceId = state.microphoneDeviceId, _levelOverride = "standard", inputVolumeOverride = state.microphoneInputVolume) {
   const requestedDevice = String(deviceId || "");
   let rawStream;
   try {
