@@ -1,3 +1,9 @@
+## v5.3.0
+
+- Torna a supressão de ruído opcional: **Padrão** ou **Desligada**.
+- Mantém o cancelamento de eco **desligado permanentemente**.
+- Corrige o texto das configurações para refletir o processamento real do microfone.
+
 ## v5.2.9
 
 - Adiciona as opções de supressão de ruído **Padrão** e **Desligada**.
