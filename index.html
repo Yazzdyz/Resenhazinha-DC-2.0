@@ -608,12 +608,14 @@
                 </div>
                 <div class="voice-settings-divider"></div>
                 <div class="settings-field">
-                  <span>Processamento de voz</span>
-                  <select id="noise-suppression-select" aria-label="Processamento de voz" disabled>
+                  <span>Supressão de ruído</span>
+                  <select id="noise-suppression-select" aria-label="Supressão de ruído">
+                    <option value="off">Desligada</option>
                     <option value="standard" selected>Padrão</option>
                   </select>
                 </div>
-                <div class="noise-level-note" id="noise-level-note">Microfone direto com processamento nativo do WebRTC: redução de ruído padrão, cancelamento de eco e ganho automático, sem filtro ou gate extra do Resenhazinha.</div>
+                <div class="noise-level-note" id="noise-level-note">Padrão: redução de ruído nativa do Chromium/WebRTC. Cancelamento de eco permanece desligado.</div>
+                <div class="noise-level-note">Cancelamento de eco: <strong>desligado permanentemente</strong>.</div>
               </section>
 
               <section class="settings-section appearance-settings-section user-settings-page" data-user-settings-page="background" hidden>
