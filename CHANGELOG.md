@@ -1,3 +1,9 @@
+## v5.2.7
+
+- Remove a supressão de ruído e o voice isolation personalizados do microfone.
+- Publica a faixa original do microfone diretamente pelo WebRTC em 100% de ganho.
+- Mantém cancelamento de eco e controle automático de ganho do WebRTC, sem o filtro/gate próprio do app.
+
 ## v5.2.6
 
 - Garante apenas uma instância do Resenhazinha por PC.
