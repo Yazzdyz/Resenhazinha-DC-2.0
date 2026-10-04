@@ -1,4 +1,4 @@
-const { app, BrowserWindow, clipboard, desktopCapturer, dialog, ipcMain, nativeImage, session, Notification, powerSaveBlocker } = require("electron");
+const { app, BrowserWindow, Menu, Tray, clipboard, desktopCapturer, dialog, ipcMain, nativeImage, session, Notification, powerSaveBlocker } = require("electron");
 const { execFile, spawn } = require("child_process");
 const crypto = require("crypto");
 const fs = require("fs/promises");
@@ -9,6 +9,8 @@ const { Readable } = require("stream");
 const { pipeline } = require("stream/promises");
 
 let mainWindow;
+let tray = null;
+let isQuitting = false;
 let voicePowerSaveBlockerId = null;
 let pendingDesktopSourceId = null;
 let filteredAudioCaptures = new Map();
@@ -659,6 +661,36 @@ function setVoicePowerSave(active) {
   voicePowerSaveBlockerId = null;
 }
 
+function createTray() {
+  if (tray || process.platform !== "win32") return;
+
+  tray = new Tray(path.join(__dirname, "../public/icon.png"));
+  tray.setToolTip("Resenhazinha");
+
+  const showWindow = () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  };
+
+  const contextMenu = Menu.buildFromTemplate([
+    { label: "Abrir Resenhazinha", click: showWindow },
+    { type: "separator" },
+    {
+      label: "Sair do Resenhazinha",
+      click: () => {
+        isQuitting = true;
+        app.quit();
+      },
+    },
+  ]);
+
+  tray.setContextMenu(contextMenu);
+  tray.on("double-click", showWindow);
+  tray.on("click", showWindow);
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -684,7 +716,17 @@ function createWindow() {
     if (!mainWindow.isMaximized()) mainWindow.maximize();
     mainWindow.show();
   });
-  mainWindow.on("closed", () => { stopFilteredAudioCapture(); setVoicePowerSave(false); });
+
+  mainWindow.on("close", (event) => {
+    if (isQuitting) return;
+    event.preventDefault();
+    mainWindow.hide();
+  });
+
+  mainWindow.on("closed", () => {
+    stopFilteredAudioCapture();
+    setVoicePowerSave(false);
+  });
 
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   mainWindow.webContents.on("will-navigate", (event, url) => {
@@ -1260,6 +1302,7 @@ app.whenReady().then(() => {
   });
 
   createWindow();
+  createTray();
   setTimeout(() => { void checkForPortableUpdate(); }, 4500);
 
   app.on("activate", () => {
@@ -1271,4 +1314,12 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
-app.on("before-quit", stopFilteredAudioCapture);
+app.on("before-quit", () => {
+  isQuitting = true;
+  stopFilteredAudioCapture();
+  setVoicePowerSave(false);
+  if (tray) {
+    tray.destroy();
+    tray = null;
+  }
+});
