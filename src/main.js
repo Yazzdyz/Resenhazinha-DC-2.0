@@ -1158,7 +1158,7 @@ function loadFallbackProfileState() {
 }
 
 async function persistProfileTextState() {
-  const payload = { bio: cleanBio(state.profileBio), backgroundBlur: normalizeBackgroundBlur(state.appBackgroundBlur), backgroundZoom: normalizeBackgroundZoom(state.appBackgroundZoom), fontScale: normalizeFontScale(state.appFontScale), theme: normalizeTheme(state.appTheme), presence: normalizePresence(state.presenceStatus), closeToTray: Boolean(state.closeToTray) };
+  const payload = { bio: cleanBio(state.profileBio), backgroundBlur: normalizeBackgroundBlur(state.appBackgroundBlur), backgroundZoom: normalizeBackgroundZoom(state.appBackgroundZoom), fontScale: normalizeFontScale(state.appFontScale), theme: normalizeTheme(state.appTheme), presence: normalizePresence(state.presenceStatus), closeToTray: Boolean(state.closeToTray), noiseSuppressionLevel: normalizeNoiseSuppressionLevel(state.noiseSuppressionLevel) };
   try {
     if (window.resenhazinhaDesktop?.saveProfileText) await window.resenhazinhaDesktop.saveProfileText(payload);
   } catch (_error) {
@@ -3930,8 +3930,8 @@ function renderUserSettings() {
   renderAppearanceValues();
   renderThemeChoices();
   renderAppBackgroundPreview();
-  elements.noiseSuppressionSelect.value = "standard";
-  elements.noiseSuppressionSelect.disabled = true;
+  elements.noiseSuppressionSelect.value = normalizeNoiseSuppressionLevel(state.noiseSuppressionLevel);
+  elements.noiseSuppressionSelect.disabled = false;
   elements.microphoneInputVolumeRange.value = String(Math.round(state.microphoneInputVolume * 100));
   elements.outputVolumeRange.value = String(Math.round(state.outputVolume * 100));
   elements.speakerDeviceSelect.value = [...elements.speakerDeviceSelect.options].some((option) => option.value === state.speakerDeviceId) ? state.speakerDeviceId : "";
@@ -6143,13 +6143,14 @@ function applyLocalAudioState() {
   });
 }
 
-function microphoneAudioConstraints(deviceId = state.microphoneDeviceId) {
+function microphoneAudioConstraints(deviceId = state.microphoneDeviceId, level = state.noiseSuppressionLevel) {
   const supported = navigator.mediaDevices.getSupportedConstraints();
+  const normalizedLevel = normalizeNoiseSuppressionLevel(level);
   const constraints = {
-    // Discord-like communication baseline: let Chromium/WebRTC handle the
-    // light microphone cleanup instead of adding our own DSP/gate.
-    echoCancellation: true,
-    noiseSuppression: true,
+    // Echo cancellation is intentionally disabled globally. It was producing
+    // unacceptable voice quality for this app. Noise suppression is optional.
+    echoCancellation: false,
+    noiseSuppression: normalizedLevel === "standard",
     autoGainControl: true,
     channelCount: { ideal: 1 },
     sampleRate: { ideal: 48_000 },
@@ -6160,18 +6161,19 @@ function microphoneAudioConstraints(deviceId = state.microphoneDeviceId) {
   return constraints;
 }
 
-async function createMicrophoneCapture(deviceId = state.microphoneDeviceId, _levelOverride = "standard", inputVolumeOverride = state.microphoneInputVolume) {
+async function createMicrophoneCapture(deviceId = state.microphoneDeviceId, levelOverride = state.noiseSuppressionLevel, inputVolumeOverride = state.microphoneInputVolume) {
   const requestedDevice = String(deviceId || "");
+  const level = normalizeNoiseSuppressionLevel(levelOverride);
   let rawStream;
   try {
     rawStream = await navigator.mediaDevices.getUserMedia({
-      audio: microphoneAudioConstraints(requestedDevice),
+      audio: microphoneAudioConstraints(requestedDevice, level),
       video: false,
     });
   } catch (error) {
     if (requestedDevice && ["NotFoundError", "OverconstrainedError"].includes(error?.name)) {
       rawStream = await navigator.mediaDevices.getUserMedia({
-        audio: microphoneAudioConstraints(""),
+        audio: microphoneAudioConstraints("", level),
         video: false,
       });
     } else throw error;
