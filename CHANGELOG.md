@@ -1,3 +1,9 @@
+## v5.2.6
+
+- Garante apenas uma instância do Resenhazinha por PC.
+- Fechar a janela encerra o aplicativo por padrão.
+- Adiciona opção para fechar para a bandeja do Windows e manter o app em segundo plano.
+
 ## v5.2.2
 
 - Corrige a estabilidade da assinatura de áudio no Cloudflare Realtime SFU.
