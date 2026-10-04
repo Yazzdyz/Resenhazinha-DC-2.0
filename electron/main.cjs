@@ -11,6 +11,7 @@ const { pipeline } = require("stream/promises");
 let mainWindow;
 let tray = null;
 let isQuitting = false;
+let closeToTray = false;
 let voicePowerSaveBlockerId = null;
 let pendingDesktopSourceId = null;
 let filteredAudioCaptures = new Map();
@@ -171,6 +172,15 @@ async function readProfile() {
     return JSON.parse(await fs.readFile(getProfilePath(), "utf8"));
   } catch (_error) {
     return {};
+  }
+}
+
+function readCloseToTrayPreference() {
+  try {
+    const profile = JSON.parse(fsSync.readFileSync(getProfilePath(), "utf8"));
+    return profile?.closeToTray === true;
+  } catch (_error) {
+    return false;
   }
 }
 
@@ -661,8 +671,14 @@ function setVoicePowerSave(active) {
   voicePowerSaveBlockerId = null;
 }
 
+function destroyTray() {
+  if (!tray) return;
+  tray.destroy();
+  tray = null;
+}
+
 function createTray() {
-  if (tray || process.platform !== "win32") return;
+  if (tray || process.platform !== "win32" || !closeToTray) return;
 
   tray = new Tray(path.join(__dirname, "../public/icon.png"));
   tray.setToolTip("Resenhazinha");
@@ -718,7 +734,7 @@ function createWindow() {
   });
 
   mainWindow.on("close", (event) => {
-    if (isQuitting) return;
+    if (isQuitting || !closeToTray || process.platform !== "win32") return;
     event.preventDefault();
     mainWindow.hide();
   });
@@ -1079,6 +1095,7 @@ app.whenReady().then(() => {
       fontScale: normalizeFontScale(profile.fontScale),
       theme: normalizeTheme(profile.theme),
       presence: normalizePresence(profile.presence),
+      closeToTray: profile?.closeToTray === true,
     };
   });
 
@@ -1090,8 +1107,12 @@ app.whenReady().then(() => {
     const fontScale = normalizeFontScale(payload?.fontScale ?? profile.fontScale);
     const theme = normalizeTheme(payload?.theme ?? profile.theme);
     const presence = normalizePresence(payload?.presence ?? profile.presence);
-    await writeProfile({ ...profile, bio, backgroundBlur, backgroundZoom, fontScale, theme, presence });
-    return { saved: true, bio, backgroundBlur, backgroundZoom, fontScale, theme, presence };
+    const nextCloseToTray = Boolean(payload?.closeToTray ?? profile.closeToTray);
+    closeToTray = process.platform === "win32" && nextCloseToTray;
+    if (closeToTray) createTray();
+    else destroyTray();
+    await writeProfile({ ...profile, bio, backgroundBlur, backgroundZoom, fontScale, theme, presence, closeToTray });
+    return { saved: true, bio, backgroundBlur, backgroundZoom, fontScale, theme, presence, closeToTray };
   });
 
   ipcMain.handle("resenhazinha:cache-member-profile", async (_event, payload) => {
@@ -1301,8 +1322,9 @@ app.whenReady().then(() => {
     return { removed: true };
   });
 
+  closeToTray = readCloseToTrayPreference();
   createWindow();
-  createTray();
+  if (closeToTray) createTray();
   setTimeout(() => { void checkForPortableUpdate(); }, 4500);
 
   app.on("activate", () => {
@@ -1318,8 +1340,5 @@ app.on("before-quit", () => {
   isQuitting = true;
   stopFilteredAudioCapture();
   setVoicePowerSave(false);
-  if (tray) {
-    tray.destroy();
-    tray = null;
-  }
+  destroyTray();
 });
