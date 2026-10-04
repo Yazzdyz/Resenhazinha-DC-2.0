@@ -3940,7 +3940,10 @@ function renderUserSettings() {
 }
 
 function renderNoiseSuppressionNote() {
-  elements.noiseLevelNote.textContent = "Padrão: redução de ruído leve do Chromium/WebRTC + cancelamento de eco e ganho automático. Sem filtro, gate ou voice isolation extra do Resenhazinha.";
+  const level = normalizeNoiseSuppressionLevel(elements.noiseSuppressionSelect.value);
+  elements.noiseLevelNote.textContent = level === "standard"
+    ? "Padrão: redução de ruído nativa do Chromium/WebRTC. Cancelamento de eco permanece desligado."
+    : "Desligada: sem redução de ruído. Cancelamento de eco permanece desligado.";
 }
 
 function normalizeMicInputVolume(value) {
