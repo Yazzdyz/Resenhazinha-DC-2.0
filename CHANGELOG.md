@@ -1,3 +1,9 @@
+## v5.2.9
+
+- Adiciona as opções de supressão de ruído **Padrão** e **Desligada**.
+- Deixa o cancelamento de eco **desligado permanentemente**.
+- Mantém apenas a redução de ruído nativa do Chromium/WebRTC quando Padrão estiver selecionado.
+
 ## v5.2.8
 
 - Mantém apenas a supressão de ruído padrão do Chromium/WebRTC.
