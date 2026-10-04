@@ -1,6 +1,6 @@
 {
   "name": "resenhazinha",
-  "version": "5.2.8",
+  "version": "5.2.9",
   "private": true,
   "type": "module",
   "description": "Chat, chamadas de voz e compartilhamento de tela para grupos pequenos.",
