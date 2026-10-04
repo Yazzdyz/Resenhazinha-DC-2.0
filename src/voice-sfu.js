@@ -37,6 +37,7 @@ function sessionDescription(value, type) {
 function createPeerConnection() {
   return new RTCPeerConnection({
     bundlePolicy: "max-bundle",
+    iceCandidatePoolSize: 2,
     iceServers: [{ urls: "stun:stun.cloudflare.com:3478" }],
   });
 }
@@ -176,21 +177,9 @@ export class VoiceSfuManager {
     this._clearRemoteStreams();
     this._emitState(this.recoveryAttempt ? "recovering" : "connecting");
 
-    let join;
-    try {
-      join = await this._request("join", {});
-    } catch (error) {
-      // O status "entrei na call" e o pedido do SFU viajam pelo mesmo WebSocket.
-      // Em reconnects muito rápidos, damos uma chance curta para o status chegar
-      // antes de recriar toda a mídia.
-      if (error?.code !== "voice_sfu_not_in_voice" || !this._isCurrentLifecycle(lifecycleId)) throw error;
-      await wait(140);
-      if (!this._isCurrentLifecycle(lifecycleId)) return;
-      join = await this._request("join", {});
-    }
-    if (!this._isCurrentLifecycle(lifecycleId)) return;
-    this.generation = Number(join.generation) || 0;
-    if (!this.generation) throw new Error("voice-sfu-generation-missing");
+    const stream = this.getVoiceStream?.();
+    const track = stream?.getAudioTracks?.()[0];
+    if (!track || track.readyState !== "live") throw new Error("voice-sfu-microphone-missing");
 
     this.producer = createPeerConnection();
     this.consumer = createPeerConnection();
@@ -198,22 +187,46 @@ export class VoiceSfuManager {
     this._bindConnectionHealth(this.consumer, "consumer");
     this.consumer.addEventListener("track", (event) => this._handleRemoteTrack(event));
 
-    const stream = this.getVoiceStream?.();
-    const track = stream?.getAudioTracks?.()[0];
-    if (!track || track.readyState !== "live") throw new Error("voice-sfu-microphone-missing");
-
     const transceiver = this.producer.addTransceiver(track, { direction: "sendonly" });
     this.publisherSender = transceiver.sender;
-    const offer = await this.producer.createOffer();
-    await this.producer.setLocalDescription(offer);
-    await waitForIceGathering(this.producer);
-    if (!this._isCurrentLifecycle(lifecycleId)) return;
-    if (transceiver.mid === null) throw new Error("voice-sfu-mid-missing");
+
+    // Não deixamos a criação da sessão no Worker bloquear a preparação do WebRTC.
+    // Enquanto o SFU cria as sessões, o navegador já prepara o offer e os candidatos ICE.
+    const joinPromise = (async () => {
+      try {
+        return await this._request("join", {});
+      } catch (error) {
+        // O status "entrei na call" e o pedido do SFU viajam pelo mesmo WebSocket.
+        // Em reconnects muito rápidos, damos uma chance curta para o status chegar
+        // antes de recriar toda a mídia.
+        if (error?.code !== "voice_sfu_not_in_voice" || !this._isCurrentLifecycle(lifecycleId)) throw error;
+        await wait(140);
+        if (!this._isCurrentLifecycle(lifecycleId)) return null;
+        return this._request("join", {});
+      }
+    })();
+
+    const offerPromise = (async () => {
+      const offer = await this.producer.createOffer();
+      await this.producer.setLocalDescription(offer);
+      await waitForIceGathering(this.producer);
+      if (!this._isCurrentLifecycle(lifecycleId)) return null;
+      if (transceiver.mid === null) throw new Error("voice-sfu-mid-missing");
+      return {
+        mid: transceiver.mid,
+        sessionDescription: sessionDescription(this.producer.localDescription, "offer"),
+      };
+    })();
+
+    const [join, preparedOffer] = await Promise.all([joinPromise, offerPromise]);
+    if (!this._isCurrentLifecycle(lifecycleId) || !join || !preparedOffer) return;
+    this.generation = Number(join.generation) || 0;
+    if (!this.generation) throw new Error("voice-sfu-generation-missing");
 
     const published = await this._request("publish", {
       generation: this.generation,
-      mid: transceiver.mid,
-      sessionDescription: sessionDescription(this.producer.localDescription, "offer"),
+      mid: preparedOffer.mid,
+      sessionDescription: preparedOffer.sessionDescription,
     });
     if (!this._isCurrentLifecycle(lifecycleId)) return;
     await this.producer.setRemoteDescription(published.sessionDescription);
