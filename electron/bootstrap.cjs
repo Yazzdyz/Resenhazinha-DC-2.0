@@ -1,6 +1,8 @@
 const { app, BrowserWindow, dialog } = require("electron");
 const { autoUpdater } = require("electron-updater");
 
+const singleInstanceLock = app.requestSingleInstanceLock();
+
 let updatePromptOpen = false;
 let updateAccepted = false;
 
@@ -77,6 +79,17 @@ function setupAutoUpdater() {
   }, 4500);
 }
 
-app.whenReady().then(setupAutoUpdater);
+if (!singleInstanceLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    const window = getMainWindow();
+    if (!window) return;
+    if (window.isMinimized()) window.restore();
+    if (!window.isVisible()) window.show();
+    window.focus();
+  });
 
-require("./main.cjs");
+  app.whenReady().then(setupAutoUpdater);
+  require("./main.cjs");
+}
