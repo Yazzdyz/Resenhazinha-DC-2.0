@@ -245,8 +245,9 @@ export class VoiceSfuManager {
     this._startStats();
 
     // A assinatura já pode estar em andamento desde o momento em que a sessão
-    // recebeu sua generation. Forçamos uma reconciliação depois do publish para
-    // capturar quem entrou/publicou durante a nossa própria negociação.
+    // recebeu sua generation. Fazemos uma reconciliação final depois do publish
+    // para capturar quem entrou/publicou durante a nossa própria negociação.
+    void this.syncParticipants(this.getMembers?.() || [], true);
   }
 
   async syncParticipants(members, force = false) {
