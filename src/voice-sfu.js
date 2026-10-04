@@ -182,9 +182,8 @@ export class VoiceSfuManager {
     if (!track || track.readyState !== "live") throw new Error("voice-sfu-microphone-missing");
 
     this.producer = createPeerConnection();
-    this.consumer = createPeerConnection();
-    this._bindConnectionHealth(this.producer, "producer");
-    this._bindConnectionHealth(this.consumer, "consumer");
+    this.consumer = this.producer;
+    this._bindConnectionHealth(this.producer, "voice");
     this.consumer.addEventListener("track", (event) => this._handleRemoteTrack(event));
 
     const transceiver = this.producer.addTransceiver(track, { direction: "sendonly" });
@@ -223,13 +222,6 @@ export class VoiceSfuManager {
     this.generation = Number(join.generation) || 0;
     if (!this.generation) throw new Error("voice-sfu-generation-missing");
 
-    // O receiving path não precisa esperar nossa própria publicação.
-    // A sessão consumidora já existe e pode negociar o áudio dos participantes
-    // que já estão publicados enquanto a sessão produtora termina o publish.
-    // Isso remove o waterfall "publish -> subscribe -> renegotiate" da entrada.
-    this.active = true;
-    void this.syncParticipants(this.getMembers?.() || [], true);
-
     const published = await this._request("publish", {
       generation: this.generation,
       mid: preparedOffer.mid,
@@ -244,9 +236,9 @@ export class VoiceSfuManager {
     this._emitState("connected", { generation: this.generation });
     this._startStats();
 
-    // A assinatura já pode estar em andamento desde o momento em que a sessão
-    // recebeu sua generation. Fazemos uma reconciliação final depois do publish
-    // para capturar quem entrou/publicou durante a nossa própria negociação.
+    // O mesmo transporte que acabou de publicar já está conectado ao SFU.
+    // A assinatura remota agora só adiciona transceivers e faz a renegociação;
+    // não existe uma segunda ICE/DTLS conexão para abrir.
     void this.syncParticipants(this.getMembers?.() || [], true);
   }
 
@@ -477,7 +469,8 @@ export class VoiceSfuManager {
 
   _closePeers() {
     this.publisherSender = null;
-    for (const peer of [this.producer, this.consumer]) {
+    const peers = [...new Set([this.producer, this.consumer].filter(Boolean))];
+    for (const peer of peers) {
       try { peer?.close?.(); } catch {}
     }
     this.producer = null;
@@ -497,7 +490,7 @@ export class VoiceSfuManager {
         const result = { transport: "sfu", rttMs: null, jitterMs: null, packetsLost: 0, packetsReceived: 0, bytesSent: 0, bytesReceived: 0 };
         const reports = [];
         if (this.producer) reports.push(await this.producer.getStats());
-        if (this.consumer) reports.push(await this.consumer.getStats());
+        if (this.consumer && this.consumer !== this.producer) reports.push(await this.consumer.getStats());
         for (const stats of reports) {
           stats.forEach((report) => {
             if (report.type === "candidate-pair" && report.state === "succeeded" && (report.nominated || report.selected)) {
