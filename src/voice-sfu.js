@@ -10,7 +10,7 @@ function wait(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-async function waitForIceGathering(peer, timeoutMs = 4_000) {
+async function waitForIceGathering(peer, timeoutMs = 1_800) {
   if (!peer || peer.iceGatheringState === "complete") return;
   await new Promise((resolve) => {
     let finished = false;
@@ -236,7 +236,11 @@ export class VoiceSfuManager {
     this.recoveryAttempt = 0;
     this._emitState("connected", { generation: this.generation });
     this._startStats();
-    await this.syncParticipants(this.getMembers?.() || [], true);
+
+    // Não bloqueia a conexão local esperando a assinatura dos outros participantes.
+    // A publicação já está ativa; a assinatura do áudio remoto continua imediatamente
+    // em paralelo e o track remoto será anexado assim que a renegociação terminar.
+    void this.syncParticipants(this.getMembers?.() || [], true);
   }
 
   async syncParticipants(members, force = false) {
